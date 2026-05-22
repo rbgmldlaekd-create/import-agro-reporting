@@ -254,32 +254,78 @@ export function downloadExcelForItem(itemCode, itemName, reportingData) {
     '개수(개)', '총무게(kg)', '비고1', '비고2', '사유'
   ];
   
-  // Map rows
-  const dataRows = filteredData.map(row => [
-    row.entrpsTyNm,
-    row.bsnmNo,
-    '', // vhcleNo
-    row.entrpsNm,
-    '', // zipNo
-    row.bassAdres,
-    '', // rprsvNm
-    '', // tlphonNo
-    '', // rprsvMoblphonTelno
-    row.dlngYmd,
-    '', // dlngQyu (1개당 무게 - 빈칸)
-    '', // dlngCoQy (개수 - 빈칸)
-    row.dlngWt,
-    '', // note1
-    '', // note2
-    ''  // resn
-  ]);
+  // Map rows as sparse arrays to omit empty columns completely (matching reference XML structure cell-for-cell)
+  const dataRows = filteredData.map(row => {
+    const arr = [];
+    arr[0] = row.entrpsTyNm;
+    
+    // Format business registration number to match xxx-xx-xxxxx with dashes
+    const bsn = row.bsnmNo;
+    let formattedBsn = bsn;
+    if (bsn) {
+      const cleanBsn = bsn.replace(/\D/g, '');
+      if (cleanBsn.length === 10) {
+        formattedBsn = `${cleanBsn.substring(0, 3)}-${cleanBsn.substring(3, 5)}-${cleanBsn.substring(5, 10)}`;
+      }
+    }
+    arr[1] = formattedBsn;
+    
+    // arr[2] (vhcleNo) is omitted
+    arr[3] = row.entrpsNm;
+    // arr[4] (zipNo) is omitted
+    arr[5] = row.bassAdres;
+    // arr[6] (rprsvNm), arr[7] (tlphonNo), arr[8] (rprsvMoblphonTelno) are omitted
+    arr[9] = row.dlngYmd;
+    // arr[10] (dlngQyu), arr[11] (dlngCoQy) are omitted
+    
+    // Write total weight in kg as string to match reference template's cell type (t: 's')
+    arr[12] = String(row.dlngWt);
+    
+    // arr[13] (note1), arr[14] (note2), arr[15] (resn) are omitted
+    return arr;
+  });
   
   const sheetData = [headerRow1, headerRow2, ...dataRows];
   
   // Write Workbook
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
-  XLSX.utils.book_append_sheet(wb, ws, '유통이력신고');
+  
+  // Set explicit column widths to prevent Excel from visually truncating business numbers or headers
+  ws['!cols'] = [
+    { wch: 15 }, // entrpsTyNm / 거래유형
+    { wch: 28 }, // bsnmNo / 사업자등록번호('-'제외)
+    { wch: 15 }, // vhcleNo / 차량등록번호
+    { wch: 30 }, // entrpsNm / 상호(성명)
+    { wch: 12 }, // zipNo / 우편번호
+    { wch: 50 }, // bassAdres / 주소(판매장소)
+    { wch: 12 }, // rprsvNm / 대표자
+    { wch: 20 }, // tlphonNo / 전화번호('-'제외)
+    { wch: 20 }, // rprsvMoblphonTelno / 휴대폰번호('-'제외)
+    { wch: 18 }, // dlngYmd / 거래일자('-'제외)
+    { wch: 15 }, // dlngQyu / 1개당무게(kg)
+    { wch: 12 }, // dlngCoQy / 개수(개)
+    { wch: 15 }, // dlngWt / 총무게(kg)
+    { wch: 15 }, // note1 / 비고1
+    { wch: 15 }, // note2 / 비고2
+    { wch: 15 }  // resn / 사유
+  ];
+
+  // Explicitly force business registration numbers and dates to be treated as strings ('s')
+  // This prevents Excel from formatting large number sequences as scientific notation or trimming digits
+  for (let i = 2; i < sheetData.length; i++) {
+    const cellRefB = XLSX.utils.encode_cell({ r: i, c: 1 }); // Column B (bsnmNo)
+    if (ws[cellRefB]) {
+      ws[cellRefB].t = 's'; // Set type to string
+    }
+    
+    const cellRefJ = XLSX.utils.encode_cell({ r: i, c: 9 }); // Column J (dlngYmd)
+    if (ws[cellRefJ]) {
+      ws[cellRefJ].t = 's'; // Set type to string
+    }
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws, '거래내역');
   
   // Set filename
   const fileName = `${minDateFormatted}~${maxDateFormatted}_${itemName}_유통이력신고 엑셀업로드.xlsx`;
