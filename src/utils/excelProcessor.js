@@ -227,109 +227,131 @@ export function downloadExcelForItem(itemCode, itemName, reportingData) {
     return;
   }
   
-  // Extract minimum and maximum dates to set dynamic filename
-  const dates = filteredData.map(d => d.dlngYmd);
-  const sortedDates = [...dates].sort();
-  const minDateStr = sortedDates[0];
-  const maxDateStr = sortedDates[sortedDates.length - 1];
+  // Group filteredData by date (dlngYmd)
+  const dateGroups = {};
+  filteredData.forEach(d => {
+    if (!dateGroups[d.dlngYmd]) {
+      dateGroups[d.dlngYmd] = [];
+    }
+    dateGroups[d.dlngYmd].push(d);
+  });
+  
+  const dates = Object.keys(dateGroups).sort();
   
   const formatDateWithDots = (dateStr) => {
     if (!dateStr || dateStr.length !== 8) return dateStr;
     return `${dateStr.substring(0, 4)}.${dateStr.substring(4, 6)}.${dateStr.substring(6, 8)}`;
   };
   
-  const minDateFormatted = formatDateWithDots(minDateStr);
-  const maxDateFormatted = formatDateWithDots(maxDateStr);
-  
-  // Compliant Headers
-  const headerRow1 = [
-    'entrpsTyNm', 'bsnmNo', 'vhcleNo', 'entrpsNm', 'zipNo', 'bassAdres',
-    'rprsvNm', 'tlphonNo', 'rprsvMoblphonTelno', 'dlngYmd', 'dlngQyu',
-    'dlngCoQy', 'dlngWt', 'note1', 'note2', 'resn'
-  ];
-  
-  const headerRow2 = [
-    '거래유형', '사업자등록번호(\'-\'제외)', '차량등록번호', '상호(성명)', '우편번호', '주소(판매장소)',
-    '대표자', '전화번호(\'-\'제외)', '휴대폰번호(\'-\'제외)', '거래일자(\'-\'제외)', '1개당무게(kg)',
-    '개수(개)', '총무게(kg)', '비고1', '비고2', '사유'
-  ];
-  
-  // Map rows as sparse arrays to omit empty columns completely (matching reference XML structure cell-for-cell)
-  const dataRows = filteredData.map(row => {
-    const arr = [];
-    arr[0] = row.entrpsTyNm;
+  // Process and download each day as a separate Excel file
+  dates.forEach(dateStr => {
+    const dailyData = dateGroups[dateStr];
+    const dateFormatted = formatDateWithDots(dateStr);
     
-    // Format business registration number to match xxx-xx-xxxxx with dashes
-    const bsn = row.bsnmNo;
-    let formattedBsn = bsn;
-    if (bsn) {
-      const cleanBsn = bsn.replace(/\D/g, '');
-      if (cleanBsn.length === 10) {
-        formattedBsn = `${cleanBsn.substring(0, 3)}-${cleanBsn.substring(3, 5)}-${cleanBsn.substring(5, 10)}`;
+    // Compliant Headers
+    const headerRow1 = [
+      'entrpsTyNm', 'bsnmNo', 'vhcleNo', 'entrpsNm', 'zipNo', 'bassAdres',
+      'rprsvNm', 'tlphonNo', 'rprsvMoblphonTelno', 'dlngYmd', 'dlngQyu',
+      'dlngCoQy', 'dlngWt', 'note1', 'note2', 'resn'
+    ];
+    
+    const headerRow2 = [
+      '거래유형', '사업자등록번호(\'-\'제외)', '차량등록번호', '상호(성명)', '우편번호', '주소(판매장소)',
+      '대표자', '전화번호(\'-\'제외)', '휴대폰번호(\'-\'제외)', '거래일자(\'-\'제외)', '1개당무게(kg)',
+      '개수(개)', '총무게(kg)', '비고1', '비고2', '사유'
+    ];
+    
+    // Map rows as sparse arrays to omit empty columns completely (matching reference XML structure cell-for-cell)
+    const dataRows = dailyData.map(row => {
+      const arr = [];
+      arr[0] = row.entrpsTyNm;
+      
+      // bsnmNo를 문자열 타입으로 변환 ('-' 제외)
+      arr[1] = row.bsnmNo ? String(row.bsnmNo).replace(/\D/g, '') : '';
+      
+      // arr[2] (vhcleNo) is omitted
+      arr[3] = row.entrpsNm;
+      // arr[4] (zipNo) is omitted
+      arr[5] = row.bassAdres;
+      // arr[6] (rprsvNm), arr[7] (tlphonNo), arr[8] (rprsvMoblphonTelno) are omitted
+      
+      // dlngYmd를 문자열 타입으로 변환
+      arr[9] = row.dlngYmd ? String(row.dlngYmd).replace(/\D/g, '') : '';
+      
+      // arr[10] (dlngQyu), arr[11] (dlngCoQy) are omitted
+      
+      // dlngWt를 숫자 타입으로 변환
+      arr[12] = row.dlngWt !== undefined && row.dlngWt !== null ? Number(row.dlngWt) : '';
+      
+      // arr[13] (note1), arr[14] (note2), arr[15] (resn) are omitted
+      return arr;
+    });
+    
+    const sheetData = [headerRow1, headerRow2, ...dataRows];
+    
+    // Write Workbook
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+    
+    // Set explicit column widths to prevent Excel from visually truncating business numbers or headers
+    ws['!cols'] = [
+      { wch: 15 }, // entrpsTyNm / 거래유형
+      { wch: 28 }, // bsnmNo / 사업자등록번호('-'제외)
+      { wch: 15 }, // vhcleNo / 차량등록번호
+      { wch: 30 }, // entrpsNm / 상호(성명)
+      { wch: 12 }, // zipNo / 우편번호
+      { wch: 50 }, // bassAdres / 주소(판매장소)
+      { wch: 12 }, // rprsvNm / 대표자
+      { wch: 20 }, // tlphonNo / 전화번호('-'제외)
+      { wch: 20 }, // rprsvMoblphonTelno / 휴대폰번호('-'제외)
+      { wch: 18 }, // dlngYmd / 거래일자('-'제외)
+      { wch: 15 }, // dlngQyu / 1개당무게(kg)
+      { wch: 12 }, // dlngCoQy / 개수(개)
+      { wch: 15 }, // dlngWt / 총무게(kg)
+      { wch: 15 }, // note1 / 비고1
+      { wch: 15 }, // note2 / 비고2
+      { wch: 15 }  // resn / 사유
+    ];
+  
+    // Explicitly force business registration numbers and dates to be treated as strings ('s')
+    // This prevents Excel from formatting large number sequences as scientific notation or trimming digits
+    // Total weights (dlngWt) are treated as numbers ('n')
+    for (let i = 2; i < sheetData.length; i++) {
+      const cellRefB = XLSX.utils.encode_cell({ r: i, c: 1 }); // Column B (bsnmNo)
+      if (!ws[cellRefB]) {
+        ws[cellRefB] = { t: 's', v: '' };
+      } else {
+        ws[cellRefB].t = 's';
+        ws[cellRefB].v = String(ws[cellRefB].v);
+      }
+      
+      const cellRefJ = XLSX.utils.encode_cell({ r: i, c: 9 }); // Column J (dlngYmd)
+      if (!ws[cellRefJ]) {
+        ws[cellRefJ] = { t: 's', v: '' };
+      } else {
+        ws[cellRefJ].t = 's';
+        ws[cellRefJ].v = String(ws[cellRefJ].v);
+      }
+  
+      const cellRefM = XLSX.utils.encode_cell({ r: i, c: 12 }); // Column M (dlngWt)
+      if (!ws[cellRefM]) {
+        ws[cellRefM] = { t: 'n', v: '' };
+      } else {
+        ws[cellRefM].t = 'n';
+        ws[cellRefM].v = ws[cellRefM].v !== '' ? Number(ws[cellRefM].v) : '';
       }
     }
-    arr[1] = formattedBsn;
+  
+    XLSX.utils.book_append_sheet(wb, ws, '거래내역');
     
-    // arr[2] (vhcleNo) is omitted
-    arr[3] = row.entrpsNm;
-    // arr[4] (zipNo) is omitted
-    arr[5] = row.bassAdres;
-    // arr[6] (rprsvNm), arr[7] (tlphonNo), arr[8] (rprsvMoblphonTelno) are omitted
-    arr[9] = row.dlngYmd;
-    // arr[10] (dlngQyu), arr[11] (dlngCoQy) are omitted
+    // Calculate total weight in kg for this day
+    const totalWeight = dailyData.reduce((acc, curr) => acc + (curr.dlngWt || 0), 0);
+    const totalWeightFormatted = Number(totalWeight.toFixed(3));
+  
+    // Set filename
+    const fileName = `${dateFormatted}_${itemName}_${totalWeightFormatted.toLocaleString()}kg_유통이력신고 엑셀업로드.xlsx`;
     
-    // Write total weight in kg as string to match reference template's cell type (t: 's')
-    arr[12] = String(row.dlngWt);
-    
-    // arr[13] (note1), arr[14] (note2), arr[15] (resn) are omitted
-    return arr;
+    // Trigger file download
+    XLSX.writeFile(wb, fileName);
   });
-  
-  const sheetData = [headerRow1, headerRow2, ...dataRows];
-  
-  // Write Workbook
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(sheetData);
-  
-  // Set explicit column widths to prevent Excel from visually truncating business numbers or headers
-  ws['!cols'] = [
-    { wch: 15 }, // entrpsTyNm / 거래유형
-    { wch: 28 }, // bsnmNo / 사업자등록번호('-'제외)
-    { wch: 15 }, // vhcleNo / 차량등록번호
-    { wch: 30 }, // entrpsNm / 상호(성명)
-    { wch: 12 }, // zipNo / 우편번호
-    { wch: 50 }, // bassAdres / 주소(판매장소)
-    { wch: 12 }, // rprsvNm / 대표자
-    { wch: 20 }, // tlphonNo / 전화번호('-'제외)
-    { wch: 20 }, // rprsvMoblphonTelno / 휴대폰번호('-'제외)
-    { wch: 18 }, // dlngYmd / 거래일자('-'제외)
-    { wch: 15 }, // dlngQyu / 1개당무게(kg)
-    { wch: 12 }, // dlngCoQy / 개수(개)
-    { wch: 15 }, // dlngWt / 총무게(kg)
-    { wch: 15 }, // note1 / 비고1
-    { wch: 15 }, // note2 / 비고2
-    { wch: 15 }  // resn / 사유
-  ];
-
-  // Explicitly force business registration numbers and dates to be treated as strings ('s')
-  // This prevents Excel from formatting large number sequences as scientific notation or trimming digits
-  for (let i = 2; i < sheetData.length; i++) {
-    const cellRefB = XLSX.utils.encode_cell({ r: i, c: 1 }); // Column B (bsnmNo)
-    if (ws[cellRefB]) {
-      ws[cellRefB].t = 's'; // Set type to string
-    }
-    
-    const cellRefJ = XLSX.utils.encode_cell({ r: i, c: 9 }); // Column J (dlngYmd)
-    if (ws[cellRefJ]) {
-      ws[cellRefJ].t = 's'; // Set type to string
-    }
-  }
-
-  XLSX.utils.book_append_sheet(wb, ws, '거래내역');
-  
-  // Set filename
-  const fileName = `${minDateFormatted}~${maxDateFormatted}_${itemName}_유통이력신고 엑셀업로드.xlsx`;
-  
-  // Trigger file download
-  XLSX.writeFile(wb, fileName);
 }
