@@ -19,7 +19,8 @@ import {
   CheckCircle2,
   XCircle,
   TrendingUp,
-  Settings
+  Settings,
+  X
 } from 'lucide-react';
 
 const iconMapping = {
@@ -42,7 +43,8 @@ const iconMapping = {
   'check-circle': CheckCircle2,
   'x-circle': XCircle,
   'trending-up': TrendingUp,
-  'settings': Settings
+  'settings': Settings,
+  'x': X
 };
 
 const Icon = ({ name, className = '', ...props }) => {

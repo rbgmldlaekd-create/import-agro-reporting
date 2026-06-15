@@ -13,7 +13,10 @@ const FileUploadSection = ({
   targetItemsFile,
   handleTargetUpload,
   targetLoading,
-  targetCount
+  targetCount,
+  handleShipmentDelete,
+  handleClientDelete,
+  handleTargetDelete
 }) => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -48,9 +51,19 @@ const FileUploadSection = ({
 
         {shipmentFile && (
           <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between text-[11px]">
-            <span className="text-slate-600 font-bold truncate max-w-[170px]" title={shipmentFile.name}>
-              📄 {shipmentFile.name}
-            </span>
+            <div className="flex items-center gap-1.5 min-w-0 mr-2">
+              <span className="text-slate-600 font-bold truncate max-w-[120px]" title={shipmentFile.name}>
+                📄 {shipmentFile.name}
+              </span>
+              <button
+                type="button"
+                onClick={handleShipmentDelete}
+                className="text-slate-400 hover:text-red-500 transition-colors shrink-0 p-0.5 hover:bg-slate-100 rounded"
+                title="파일 삭제"
+              >
+                <Icon name="x" className="w-3.5 h-3.5" />
+              </button>
+            </div>
             <span className="text-indigo-600 font-extrabold shrink-0">
               {shipmentCount.toLocaleString()}행 파싱 완료
             </span>
@@ -88,9 +101,19 @@ const FileUploadSection = ({
 
         {clientInfoFile && (
           <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between text-[11px]">
-            <span className="text-slate-600 font-bold truncate max-w-[170px]" title={clientInfoFile.name}>
-              📄 {clientInfoFile.name}
-            </span>
+            <div className="flex items-center gap-1.5 min-w-0 mr-2">
+              <span className="text-slate-600 font-bold truncate max-w-[120px]" title={clientInfoFile.name}>
+                📄 {clientInfoFile.name}
+              </span>
+              <button
+                type="button"
+                onClick={handleClientDelete}
+                className="text-slate-400 hover:text-red-500 transition-colors shrink-0 p-0.5 hover:bg-slate-100 rounded"
+                title="파일 삭제"
+              >
+                <Icon name="x" className="w-3.5 h-3.5" />
+              </button>
+            </div>
             <span className="text-indigo-600 font-extrabold shrink-0">
               {clientCount.toLocaleString()}행 파싱 완료
             </span>
@@ -128,9 +151,19 @@ const FileUploadSection = ({
 
         {targetItemsFile && (
           <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between text-[11px]">
-            <span className="text-slate-600 font-bold truncate max-w-[170px]" title={targetItemsFile.name}>
-              📄 {targetItemsFile.name}
-            </span>
+            <div className="flex items-center gap-1.5 min-w-0 mr-2">
+              <span className="text-slate-600 font-bold truncate max-w-[120px]" title={targetItemsFile.name}>
+                📄 {targetItemsFile.name}
+              </span>
+              <button
+                type="button"
+                onClick={handleTargetDelete}
+                className="text-slate-400 hover:text-red-500 transition-colors shrink-0 p-0.5 hover:bg-slate-100 rounded"
+                title="파일 삭제"
+              >
+                <Icon name="x" className="w-3.5 h-3.5" />
+              </button>
+            </div>
             <span className="text-indigo-600 font-extrabold shrink-0">
               {targetCount.toLocaleString()}개 품목 등록
             </span>

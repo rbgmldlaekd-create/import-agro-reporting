@@ -5,6 +5,7 @@ import Icon from './components/Icon';
 import FileUploadSection from './components/FileUploadSection';
 import TargetItemSection from './components/TargetItemSection';
 import ResultDownloadSection from './components/ResultDownloadSection';
+import TransferMatchingSection from './components/TransferMatchingSection';
 import HelpSection from './components/HelpSection';
 
 function App() {
@@ -25,6 +26,7 @@ function App() {
   // Sidebar Menu Configuration
   const menuItems = [
     { id: 'dashboard', name: '유통이력 변환기', desc: '엑셀 파일 결합 및 다운로드', icon: 'pie-chart' },
+    { id: 'matching', name: '양수내역 매칭기', desc: '양수내역과 출하내역 매칭', icon: 'git-merge' },
     { id: 'items', name: '신고대상 품목관리', desc: '신고대상 농산물 DB 관리', icon: 'database' },
     { id: 'help', name: '사용 안내', desc: '프로그램 매뉴얼 가이드', icon: 'help-circle' }
   ];
@@ -77,6 +79,9 @@ function App() {
               handleTargetUpload={store.handleTargetUpload}
               targetLoading={store.loading.target}
               targetCount={store.baseTargetItems.length}
+              handleShipmentDelete={store.handleShipmentDelete}
+              handleClientDelete={store.handleClientDelete}
+              handleTargetDelete={store.handleTargetDelete}
             />
 
             {/* Results / Compliant Downloads Area Component */}
@@ -85,6 +90,24 @@ function App() {
               processedItemsSummary={store.processedItemsSummary}
               reportingData={store.reportingData}
               handleLoadDemo={store.handleLoadDemo}
+            />
+          </div>
+        );
+
+      case 'matching':
+        return (
+          <div className="flex-1 overflow-y-auto p-6 space-y-6 slide-in">
+            <TransferMatchingSection
+              shipmentCount={store.shipmentData.length}
+              clientCount={store.clientInfoData.length}
+              transferFile={store.transferFile}
+              handleTransferUpload={store.handleTransferUpload}
+              transferLoading={store.loading.transfer}
+              transferData={store.transferData}
+              transferMatchedData={store.transferMatchedData}
+              downloadSingleTransferExcel={store.downloadSingleTransferExcel}
+              downloadAllTransferExcel={store.downloadAllTransferExcel}
+              handleTransferDelete={store.handleTransferDelete}
             />
           </div>
         );

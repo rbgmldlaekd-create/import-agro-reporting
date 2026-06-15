@@ -126,6 +126,47 @@ export function parseFile(file) {
 }
 
 /**
+ * Parses files to a raw 2D array (Array of Arrays).
+ */
+export function parseFileAsAOA(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    
+    if (file.name.endsWith('.csv')) {
+      reader.readAsText(file, 'EUC-KR');
+      reader.onload = (e) => {
+        try {
+          const csvText = e.target.result;
+          const workbook = XLSX.read(csvText, { type: 'string' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          resolve(rawData);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = (err) => reject(err);
+    } else {
+      reader.readAsArrayBuffer(file);
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          resolve(rawData);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = (err) => reject(err);
+    }
+  });
+}
+
+/**
  * Combines shipment, client, and target item data.
  * Aggregates results by [Client + Date + Item Code]
  * Filters results to include only those matches that are in active target items.

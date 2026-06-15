@@ -1,8 +1,16 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
   parseFile,
+  parseFileAsAOA,
   processReportingData
 } from '../utils/excelProcessor';
+import {
+  parseTransferXls,
+  matchTransferWithShipments,
+  downloadMatchedExcel,
+  downloadSingleTransferExcel,
+  downloadAllTransferExcel
+} from '../utils/transferMatcher';
 
 // Helper to safely parse JSON from localStorage
 const getStoredItem = (key, fallback) => {
@@ -29,11 +37,16 @@ export function useReportingStore() {
     const name = localStorage.getItem('targetItemsFileName');
     return name ? { name } : null;
   });
+  const [transferFile, setTransferFile] = useState(() => {
+    const name = localStorage.getItem('transferFileName');
+    return name ? { name } : null;
+  });
 
   // Parsed raw lists
   const [shipmentData, setShipmentData] = useState(() => getStoredItem('shipmentData', []));
   const [clientInfoData, setClientInfoData] = useState(() => getStoredItem('clientInfoData', []));
   const [baseTargetItems, setBaseTargetItems] = useState(() => getStoredItem('baseTargetItems', []));
+  const [transferData, setTransferData] = useState(() => getStoredItem('transferData', []));
 
   // Active target items (managed and editable by user)
   const [activeTargetItems, setActiveTargetItems] = useState(() => getStoredItem('activeTargetItems', []));
@@ -79,6 +92,14 @@ export function useReportingStore() {
     }
   }, [targetItemsFile]);
 
+  useEffect(() => {
+    if (transferFile) {
+      localStorage.setItem('transferFileName', transferFile.name || '');
+    } else {
+      localStorage.removeItem('transferFileName');
+    }
+  }, [transferFile]);
+
   // Sync data arrays to localStorage
   useEffect(() => {
     try {
@@ -112,6 +133,14 @@ export function useReportingStore() {
     }
   }, [activeTargetItems]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('transferData', JSON.stringify(transferData));
+    } catch (e) {
+      console.error('Failed to save transferData to localStorage:', e);
+    }
+  }, [transferData]);
+
   // Reset all uploaded and stored data
   const handleResetAllData = () => {
     if (!window.confirm('정말로 모든 업로드 데이터 및 관리 품목 리스트를 초기화하시겠습니까?')) {
@@ -122,19 +151,23 @@ export function useReportingStore() {
     localStorage.removeItem('shipmentFileName');
     localStorage.removeItem('clientInfoFileName');
     localStorage.removeItem('targetItemsFileName');
+    localStorage.removeItem('transferFileName');
     localStorage.removeItem('shipmentData');
     localStorage.removeItem('clientInfoData');
     localStorage.removeItem('baseTargetItems');
     localStorage.removeItem('activeTargetItems');
+    localStorage.removeItem('transferData');
 
     // Reset React States
     setShipmentFile(null);
     setClientInfoFile(null);
     setTargetItemsFile(null);
+    setTransferFile(null);
     setShipmentData([]);
     setClientInfoData([]);
     setBaseTargetItems([]);
     setActiveTargetItems([]);
+    setTransferData([]);
 
     // Reset form states
     setCustomCode('');
@@ -228,7 +261,7 @@ export function useReportingStore() {
     setTargetItemsFile(file);
     setLoading(prev => ({ ...prev, target: true }));
     try {
-      const data = await parseFile(file);
+      const data = await HookParseFile(file);
       const mapped = data.map((row, idx) => ({
         id: `xls-${idx}`,
         품목코드: String(row['품목'] || row['품목코드'] || row['코드'] || '').trim(),
@@ -244,6 +277,59 @@ export function useReportingStore() {
       setLoading(prev => ({ ...prev, target: false }));
     }
   };
+
+  // Handle Transfer upload
+  const handleTransferUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setTransferFile(file);
+    setLoading(prev => ({ ...prev, transfer: true }));
+    try {
+      const rawRows = await parseFileAsAOA(file);
+      const parsedTransfers = parseTransferXls(rawRows);
+      setTransferData(parsedTransfers);
+    } catch (err) {
+      alert(`양수내역 파일 파싱 에러: ${err.message}`);
+    } finally {
+      setLoading(prev => ({ ...prev, transfer: false }));
+    }
+  };
+
+  // Individual deletion handlers
+  const handleShipmentDelete = () => {
+    localStorage.removeItem('shipmentFileName');
+    localStorage.removeItem('shipmentData');
+    setShipmentFile(null);
+    setShipmentData([]);
+  };
+
+  const handleClientDelete = () => {
+    localStorage.removeItem('clientInfoFileName');
+    localStorage.removeItem('clientInfoData');
+    setClientInfoFile(null);
+    setClientInfoData([]);
+  };
+
+  const handleTargetDelete = () => {
+    localStorage.removeItem('targetItemsFileName');
+    localStorage.removeItem('baseTargetItems');
+    localStorage.removeItem('activeTargetItems');
+    setTargetItemsFile(null);
+    setBaseTargetItems([]);
+    setActiveTargetItems([]);
+  };
+
+  const handleTransferDelete = () => {
+    localStorage.removeItem('transferFileName');
+    localStorage.removeItem('transferData');
+    setTransferFile(null);
+    setTransferData([]);
+  };
+
+  // Helper alias to bypass local variable conflict
+  async function HookParseFile(file) {
+    return parseFile(file);
+  }
 
   // Delete item from active managed list
   const handleDeleteItem = (id) => {
@@ -298,7 +384,8 @@ export function useReportingStore() {
     const mockTargetItems = [
       { id: 'demo-1', 품목코드: '120450343', 품목명: '고추가루(굵은,국5:중5)', 단위무게: 0.5 },
       { id: 'demo-2', 품목코드: '120450344', 품목명: '고추가루(고운,국5,중5)', 단위무게: 0.5 },
-      { id: 'demo-3', 품목코드: '120991900', 품목명: '(종료)크러쉬드페퍼(레드페퍼)_과세', 단위무게: 1.0 }
+      { id: 'demo-3', 품목코드: '120751520', 품목명: '(종료)땅콩분태', 단위무게: 1.0 },
+      { id: 'demo-4', 품목코드: '120991900', 품목명: '(종료)크러쉬드페퍼(레드페퍼)_과세', 단위무게: 1.0 }
     ];
 
     const mockClients = [
@@ -321,21 +408,48 @@ export function useReportingStore() {
     ];
 
     const mockShipments = [
-      { '출하일자': '2026/05/01', '출하거래처': '11148', '품목': '120450343', '출하수량': 5 },
-      { '출하일자': '2026/05/01', '출하거래처': '11148', '품목': '120450344', '출하수량': 10 },
-      { '출하일자': '2026/05/02', '출하거래처': '11148', '품목': '120450343', '출하수량': 3 },
+      { '출하일자': '2026/05/01', '출하거래처': '11148', '품목': '120751520', '출하수량': 30 }, // 30kg
+      { '출하일자': '2026/05/01', '출하거래처': '11148', '품목': '120450343', '출하수량': 10 }, // 5kg
+      { '출하일자': '2026/05/02', '출하거래처': '11148', '품목': '120450343', '출하수량': 6 },  // 3kg
       { '출하일자': '2026/05/02', '출하거래처': '11150', '품목': '120991900', '출하수량': 15 },
       { '출하일자': '2026/05/10', '출하거래처': '11150', '품목': '120991900', '출하수량': 20 }
+    ];
+
+    const mockTransfers = [
+      {
+        id: 'demo-transfer-1',
+        originalRowIndex: 3,
+        declarationNo: '2336123300383M/1',
+        serialNo: '1025914225',
+        itemName: '볶은 알땅콩(파쇄)',
+        targetQty: 20,
+        targetDate: '20260505',
+        matchedQty: 0,
+        matchedDetails: []
+      },
+      {
+        id: 'demo-transfer-2',
+        originalRowIndex: 4,
+        declarationNo: '4241623010637M/1',
+        serialNo: '1025765575',
+        itemName: '냉동고추(금탑)',
+        targetQty: 6,
+        targetDate: '20260506',
+        matchedQty: 0,
+        matchedDetails: []
+      }
     ];
 
     setBaseTargetItems(mockTargetItems);
     setActiveTargetItems(mockTargetItems);
     setClientInfoData(mockClients);
     setShipmentData(mockShipments);
+    setTransferData(mockTransfers);
 
     setShipmentFile({ name: '데모_출하내역.xlsx' });
     setClientInfoFile({ name: '데모_거래처기준정보.xlsx' });
     setTargetItemsFile({ name: '데모_대상품목기준.xlsx' });
+    setTransferFile({ name: '데모_선택양수내역.xls' });
   };
 
   // Filtered active target items for display
@@ -369,6 +483,15 @@ export function useReportingStore() {
       targetItemList: activeTargetItems
     });
   }, [shipmentData, clientInfoData, activeTargetItems]);
+
+  const transferMatchedData = useMemo(() => {
+    return matchTransferWithShipments({
+      transferList: transferData,
+      shipmentList: shipmentData,
+      clientInfoList: clientInfoData,
+      targetItemList: activeTargetItems
+    });
+  }, [transferData, shipmentData, clientInfoData, activeTargetItems]);
 
   // Aggregate results by item to display summaries with download links
   const processedItemsSummary = useMemo(() => {
@@ -408,10 +531,12 @@ export function useReportingStore() {
     shipmentFile,
     clientInfoFile,
     targetItemsFile,
+    transferFile,
     shipmentData,
     clientInfoData,
     baseTargetItems,
     activeTargetItems,
+    transferData,
     
     // Add Item Form states
     customCode,
@@ -442,15 +567,24 @@ export function useReportingStore() {
     reportingData,
     processedItemsSummary,
     isUploadComplete,
+    transferMatchedData,
 
     // Event handlers
     handleShipmentUpload,
     handleClientUpload,
     handleTargetUpload,
+    handleTransferUpload,
+    handleShipmentDelete,
+    handleClientDelete,
+    handleTargetDelete,
+    handleTransferDelete,
     handleResetAllData,
     handleLoadDemo,
     handleDeleteItem,
     handleAddCustomItem,
-    handleAddFromDatabase
+    handleAddFromDatabase,
+    downloadMatchedExcel,
+    downloadSingleTransferExcel,
+    downloadAllTransferExcel
   };
 }
