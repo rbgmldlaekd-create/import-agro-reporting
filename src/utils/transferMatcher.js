@@ -544,10 +544,14 @@ export function downloadSingleTransferExcel(transfer) {
 
   XLSX.utils.book_append_sheet(wb, ws, '거래내역');
   
-  // 파일명 포맷: [품목명]_[양도업체명]_거래량:[거래량]kg.xlsx
+  // 파일명 포맷: [거래일자]_[품목명]_[양도업체명]_거래량:[거래량]kg.xlsx
   const supplierNameClean = String(transfer.supplierName || '미확인양도처').replace(/[\/\\:\*\?"<>\|]/g, '');
   const itemNameClean = String(transfer.itemName).replace(/[\/\\:\*\?"<>\|]/g, '');
-  const fileName = `${itemNameClean}_${supplierNameClean}_거래량:${transfer.targetQty}kg.xlsx`;
+  const dateStr = transfer.targetDate || '';
+  const dateFormatted = dateStr.length === 8 
+    ? `${dateStr.substring(0, 4)}.${dateStr.substring(4, 6)}.${dateStr.substring(6, 8)}` 
+    : dateStr;
+  const fileName = `${dateFormatted}_${itemNameClean}_${supplierNameClean}_거래량:${transfer.targetQty}kg.xlsx`;
 
   XLSX.writeFile(wb, fileName);
 }
