@@ -396,3 +396,79 @@ export function downloadExcelForItem(itemCode, itemName, reportingData) {
     XLSX.writeFile(wb, fileName);
   });
 }
+
+/**
+ * Downloads shipment data as an HTML-based Excel file with yellow highlighted rows for completed declarations.
+ */
+export function downloadStyledShipmentExcel(shipmentData, completedShipmentIds) {
+  if (!shipmentData || shipmentData.length === 0) {
+    alert('다운로드할 출하내역 데이터가 존재하지 않습니다.');
+    return;
+  }
+
+  // Get all unique keys in shipmentData (excluding system metadata keys)
+  const allKeys = [];
+  shipmentData.forEach(row => {
+    Object.keys(row).forEach(key => {
+      if (key !== '_id' && key !== '_fileName' && !allKeys.includes(key)) {
+        allKeys.push(key);
+      }
+    });
+  });
+
+  // Generate HTML table compatible with Excel
+  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style>
+  table { border-collapse: collapse; }
+  th { background-color: #E2E8F0; font-weight: bold; border: 1px solid #CBD5E1; padding: 6px; font-size: 11px; font-family: sans-serif; }
+  td { border: 1px solid #CBD5E1; padding: 6px; font-size: 11px; font-family: sans-serif; mso-number-format:"\\@"; }
+</style>
+</head>
+<body>
+<table>
+  <thead>
+    <tr>
+      ${allKeys.map(key => `<th>${key}</th>`).join('')}
+    </tr>
+  </thead>
+  <tbody>`;
+
+  shipmentData.forEach(row => {
+    const isCompleted = completedShipmentIds.has(row._id);
+    const rowStyle = isCompleted ? ' style="background-color: #FEF08A;"' : ''; // soft yellow highlight
+    
+    html += `\n    <tr${rowStyle}>`;
+    allKeys.forEach(key => {
+      const val = row[key] !== undefined && row[key] !== null ? row[key] : '';
+      html += `<td>${val}</td>`;
+    });
+    html += `</tr>`;
+  });
+
+  html += `\n  </tbody>
+</table>
+</body>
+</html>`;
+
+  // Create download link
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  
+  // Format filename: YYYY.MM.DD(요일) 작업완료 주문현황
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
+  const dayOfWeek = weekDays[now.getDay()];
+  const dateStr = `${yyyy}.${mm}.${dd}(${dayOfWeek})`;
+  
+  link.setAttribute('download', `${dateStr} 작업완료 주문현황.xls`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}

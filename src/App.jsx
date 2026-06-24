@@ -67,7 +67,8 @@ function App() {
 
             {/* STEP 1, 2, 3 Excel Files Upload Component */}
             <FileUploadSection
-              shipmentFile={store.shipmentFile}
+              shipmentFiles={store.shipmentFiles}
+              shipmentDateRange={store.shipmentDateRange}
               handleShipmentUpload={store.handleShipmentUpload}
               shipmentLoading={store.loading.shipment}
               shipmentCount={store.shipmentData.length}
@@ -108,6 +109,10 @@ function App() {
               downloadSingleTransferExcel={store.downloadSingleTransferExcel}
               downloadAllTransferExcel={store.downloadAllTransferExcel}
               handleTransferDelete={store.handleTransferDelete}
+              completedTransferIds={store.completedTransferIds}
+              toggleTransferComplete={store.toggleTransferComplete}
+              restoreCompletedTransfers={store.restoreCompletedTransfers}
+              shipmentData={store.shipmentData}
             />
           </div>
         );

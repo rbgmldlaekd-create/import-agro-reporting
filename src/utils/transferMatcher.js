@@ -220,7 +220,7 @@ export function matchTransferWithShipments({
     }
 
     shipmentPool[itemCode].push({
-      id: `shipment-${Math.random().toString(36).substr(2, 9)}`,
+      id: row._id || `shipment-${Math.random().toString(36).substr(2, 9)}`,
       itemCode,
       date,
       qty,
@@ -236,12 +236,19 @@ export function matchTransferWithShipments({
     shipmentPool[code].sort((a, b) => a.date.localeCompare(b.date));
   });
 
-  // 4. 양수내역 리스트 복제 및 날짜 정렬
+  // 4. 양수내역 리스트 복제 및 날짜 정렬 (오름차순 및 원래 행 기준 안정한 정렬)
   const sortedTransfers = [...transferList].map(t => ({
     ...t,
     matchedQty: 0,
     matchedDetails: []
-  })).sort((a, b) => a.targetDate.localeCompare(b.targetDate));
+  })).sort((a, b) => {
+    const valA = a.targetDate || '';
+    const valB = b.targetDate || '';
+    if (valA !== valB) {
+      return valA.localeCompare(valB);
+    }
+    return (a.originalRowIndex || 0) - (b.originalRowIndex || 0);
+  });
 
   // 5. FIFO 매칭 루프
   sortedTransfers.forEach(transfer => {

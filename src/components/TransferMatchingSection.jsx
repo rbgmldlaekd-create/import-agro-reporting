@@ -1,6 +1,7 @@
 import React from 'react';
 import Icon from './Icon';
 import Button from './Button';
+import { downloadStyledShipmentExcel } from '../utils/excelProcessor';
 
 const TransferMatchingSection = ({
   shipmentCount,
@@ -12,9 +13,90 @@ const TransferMatchingSection = ({
   transferMatchedData,
   downloadSingleTransferExcel,
   downloadAllTransferExcel,
-  handleTransferDelete
+  handleTransferDelete,
+  completedTransferIds,
+  toggleTransferComplete,
+  restoreCompletedTransfers,
+  shipmentData
 }) => {
   const { matchedRecords, transferSummary } = transferMatchedData || { matchedRecords: [], transferSummary: [] };
+
+  const handleDownloadCompletedShipments = () => {
+    if (!completedTransferIds || completedTransferIds.length === 0) {
+      alert('신고 완료로 체크된 항목이 없습니다. 목록에서 신고완료 처리를 먼저 진행해 주세요.');
+      return;
+    }
+
+    // Find all shipmentIds matched to completed transfers
+    const completedShipmentIds = new Set();
+    transferSummary.forEach(transfer => {
+      if (completedTransferIds.includes(transfer.id)) {
+        transfer.matchedDetails.forEach(detail => {
+          completedShipmentIds.add(detail.shipmentId);
+        });
+      }
+    });
+
+    if (completedShipmentIds.size === 0) {
+      alert('매칭된 출하 건 중 신고 완료된 항목이 없습니다.');
+      return;
+    }
+
+    downloadStyledShipmentExcel(shipmentData, completedShipmentIds);
+  };
+
+  const handleBackupData = () => {
+    if (!completedTransferIds || completedTransferIds.length === 0) {
+      alert('백업할 작업 완료 내역이 없습니다.');
+      return;
+    }
+    const dataStr = JSON.stringify({
+      version: '1.0',
+      backupDate: new Date().toISOString(),
+      completedTransferIds
+    }, null, 2);
+    
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
+    const dayOfWeek = weekDays[now.getDay()];
+    const dateStr = `${yyyy}.${mm}.${dd}(${dayOfWeek})`;
+
+    link.setAttribute('download', `${dateStr} 작업완료 주문현황.json`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleRestoreData = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target.result);
+        if (parsed && Array.isArray(parsed.completedTransferIds)) {
+          restoreCompletedTransfers(parsed.completedTransferIds);
+        } else if (Array.isArray(parsed)) {
+          restoreCompletedTransfers(parsed);
+        } else {
+          alert('올바르지 않은 백업 파일 형식입니다.');
+        }
+      } catch (err) {
+        alert('백업 파일을 읽는 중 오류가 발생했습니다.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   // 매칭 기초 조건 충족 여부
   const isBaseReady = shipmentCount > 0 && clientCount > 0;
@@ -185,18 +267,70 @@ const TransferMatchingSection = ({
               <Icon name="info" className="w-3.5 h-3.5 text-slate-400" />
               Q열 거래일자보다 늦은 출하일자는 매칭에서 자동 제외됩니다.
             </span>
-            <Button
-              variant="indigo"
-              size="sm"
-              disabled={matchedRecords.length === 0}
-              onClick={() => downloadAllTransferExcel(transferSummary)}
-            >
-              📥 전체 건 개별 다운로드
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="warning"
+                size="sm"
+                disabled={shipmentCount === 0 || !completedTransferIds || completedTransferIds.length === 0}
+                onClick={handleDownloadCompletedShipments}
+              >
+                🔍 신고완료건 확인하기
+              </Button>
+              <Button
+                variant="indigo"
+                size="sm"
+                disabled={matchedRecords.length === 0}
+                onClick={() => downloadAllTransferExcel(transferSummary)}
+              >
+                📥 전체 건 개별 다운로드
+              </Button>
+            </div>
           </div>
         </div>
 
       </div>
+
+      {/* 작업 백업 및 복구 영역 */}
+      {transferData.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+              <Icon name="database" className="w-4 h-4" />
+            </span>
+            <div>
+              <h4 className="text-xs font-black text-slate-800">진행 중인 신고 완료 작업 백업</h4>
+              <p className="text-[10px] text-slate-400">캐시가 삭제되어도 복구할 수 있도록 작업 내역을 파일로 저장하고 불러옵니다.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleBackupData}
+              className="w-full sm:w-auto text-[11px]"
+            >
+              📤 작업 내역 백업 (다운로드)
+            </Button>
+            <div className="relative w-full sm:w-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full sm:w-auto text-[11px]"
+                onClick={() => document.getElementById('restore-file-input').click()}
+              >
+                📥 작업 내역 복구 (불러오기)
+              </Button>
+              <input
+                id="restore-file-input"
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={handleRestoreData}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 3. 매칭 결과 상세 테이블 */}
       {transferData.length > 0 && (
@@ -222,14 +356,16 @@ const TransferMatchingSection = ({
                   <th className="py-3.5 px-4 w-[110px] text-right">매칭완료량(kg)</th>
                   <th className="py-3.5 px-4 w-[100px] text-center">상태</th>
                   <th className="py-3.5 px-4 w-[120px] text-center">출하 배분횟수</th>
+                  <th className="py-3.5 px-4 w-[110px] text-center">신고완료 체크</th>
                   <th className="py-3.5 px-4 w-[90px] text-center">다운로드</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {transferSummary.map((row) => {
                   const isUnder = row.matchedQty < row.targetQty;
+                  const isCompleted = completedTransferIds && completedTransferIds.includes(row.id);
                   return (
-                    <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                    <tr key={row.id} className={`hover:bg-slate-50/50 transition-colors ${isCompleted ? 'bg-indigo-50/20' : ''}`}>
                       <td className="py-3.5 px-4 text-center font-bold text-slate-400">{row.originalRowIndex}</td>
                       <td className="py-3.5 px-4 font-mono font-bold text-slate-600">{formatDate(row.targetDate)}</td>
                       <td className="py-3.5 px-4 font-mono font-bold text-slate-700">{row.declarationNo}</td>
@@ -253,6 +389,15 @@ const TransferMatchingSection = ({
                       </td>
                       <td className="py-3.5 px-4 text-center font-bold text-slate-500">
                         {row.matchedDetails.length}회 분할매칭
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <Button
+                          variant={isCompleted ? "success" : "outline"}
+                          size="xs"
+                          onClick={() => toggleTransferComplete(row.id)}
+                        >
+                          {isCompleted ? "✓ 신고완료" : "신고 대기"}
+                        </Button>
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <Button

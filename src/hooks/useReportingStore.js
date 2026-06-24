@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect } from 'react';
 import {
   parseFile,
   parseFileAsAOA,
-  processReportingData
+  processReportingData,
+  formatExcelDate
 } from '../utils/excelProcessor';
 import {
   parseTransferXls,
@@ -25,9 +26,8 @@ const getStoredItem = (key, fallback) => {
 
 export function useReportingStore() {
   // File upload states (restored as virtual File-like objects with only name property)
-  const [shipmentFile, setShipmentFile] = useState(() => {
-    const name = localStorage.getItem('shipmentFileName');
-    return name ? { name } : null;
+  const [shipmentFiles, setShipmentFiles] = useState(() => {
+    return getStoredItem('shipmentFiles', []);
   });
   const [clientInfoFile, setClientInfoFile] = useState(() => {
     const name = localStorage.getItem('clientInfoFileName');
@@ -51,6 +51,9 @@ export function useReportingStore() {
   // Active target items (managed and editable by user)
   const [activeTargetItems, setActiveTargetItems] = useState(() => getStoredItem('activeTargetItems', []));
 
+  // Declaration completion states
+  const [completedTransferIds, setCompletedTransferIds] = useState(() => getStoredItem('completedTransferIds', []));
+
   // Form & Dropdown & Search states
   const [customCode, setCustomCode] = useState('');
   const [customName, setCustomName] = useState('');
@@ -69,12 +72,12 @@ export function useReportingStore() {
 
   // Sync virtual file names to localStorage
   useEffect(() => {
-    if (shipmentFile) {
-      localStorage.setItem('shipmentFileName', shipmentFile.name || '');
-    } else {
-      localStorage.removeItem('shipmentFileName');
+    try {
+      localStorage.setItem('shipmentFiles', JSON.stringify(shipmentFiles));
+    } catch (e) {
+      console.error('Failed to save shipmentFiles to localStorage:', e);
     }
-  }, [shipmentFile]);
+  }, [shipmentFiles]);
 
   useEffect(() => {
     if (clientInfoFile) {
@@ -141,6 +144,14 @@ export function useReportingStore() {
     }
   }, [transferData]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('completedTransferIds', JSON.stringify(completedTransferIds));
+    } catch (e) {
+      console.error('Failed to save completedTransferIds to localStorage:', e);
+    }
+  }, [completedTransferIds]);
+
   // Reset all uploaded and stored data
   const handleResetAllData = () => {
     if (!window.confirm('정말로 모든 업로드 데이터 및 관리 품목 리스트를 초기화하시겠습니까?')) {
@@ -148,7 +159,7 @@ export function useReportingStore() {
     }
 
     // Clear localStorage keys
-    localStorage.removeItem('shipmentFileName');
+    localStorage.removeItem('shipmentFiles');
     localStorage.removeItem('clientInfoFileName');
     localStorage.removeItem('targetItemsFileName');
     localStorage.removeItem('transferFileName');
@@ -157,9 +168,10 @@ export function useReportingStore() {
     localStorage.removeItem('baseTargetItems');
     localStorage.removeItem('activeTargetItems');
     localStorage.removeItem('transferData');
+    localStorage.removeItem('completedTransferIds');
 
     // Reset React States
-    setShipmentFile(null);
+    setShipmentFiles([]);
     setClientInfoFile(null);
     setTargetItemsFile(null);
     setTransferFile(null);
@@ -168,6 +180,7 @@ export function useReportingStore() {
     setBaseTargetItems([]);
     setActiveTargetItems([]);
     setTransferData([]);
+    setCompletedTransferIds([]);
 
     // Reset form states
     setCustomCode('');
@@ -226,11 +239,26 @@ export function useReportingStore() {
   const handleShipmentUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setShipmentFile(file);
     setLoading(prev => ({ ...prev, shipment: true }));
     try {
       const data = await parseFile(file);
-      setShipmentData(data);
+      const mappedData = data.map((row, idx) => ({ 
+        ...row, 
+        _id: `shipment-${Date.now()}-${idx}`,
+        _fileName: file.name 
+      }));
+      
+      // Update files list (overwrite if file name already exists)
+      setShipmentFiles(prev => {
+        const filtered = prev.filter(f => f.name !== file.name);
+        return [...filtered, { name: file.name, count: data.length }];
+      });
+      
+      // Update data (overwrite rows associated with the same file name)
+      setShipmentData(prev => {
+        const filtered = prev.filter(row => row._fileName !== file.name);
+        return [...filtered, ...mappedData];
+      });
     } catch (err) {
       alert(`출하내역 파일 파싱 에러: ${err.message}`);
     } finally {
@@ -296,11 +324,16 @@ export function useReportingStore() {
   };
 
   // Individual deletion handlers
-  const handleShipmentDelete = () => {
-    localStorage.removeItem('shipmentFileName');
-    localStorage.removeItem('shipmentData');
-    setShipmentFile(null);
-    setShipmentData([]);
+  const handleShipmentDelete = (fileName) => {
+    if (fileName) {
+      setShipmentFiles(prev => prev.filter(f => f.name !== fileName));
+      setShipmentData(prev => prev.filter(row => row._fileName !== fileName));
+    } else {
+      localStorage.removeItem('shipmentFiles');
+      localStorage.removeItem('shipmentData');
+      setShipmentFiles([]);
+      setShipmentData([]);
+    }
   };
 
   const handleClientDelete = () => {
@@ -440,13 +473,19 @@ export function useReportingStore() {
       }
     ];
 
+    const mockShipmentsMapped = mockShipments.map((row, idx) => ({
+        ...row,
+        _id: `shipment-demo-${idx}`,
+        _fileName: '데모_출하내역.xlsx'
+    }));
+
     setBaseTargetItems(mockTargetItems);
     setActiveTargetItems(mockTargetItems);
     setClientInfoData(mockClients);
-    setShipmentData(mockShipments);
+    setShipmentData(mockShipmentsMapped);
     setTransferData(mockTransfers);
 
-    setShipmentFile({ name: '데모_출하내역.xlsx' });
+    setShipmentFiles([{ name: '데모_출하내역.xlsx', count: mockShipments.length }]);
     setClientInfoFile({ name: '데모_거래처기준정보.xlsx' });
     setTargetItemsFile({ name: '데모_대상품목기준.xlsx' });
     setTransferFile({ name: '데모_선택양수내역.xls' });
@@ -474,6 +513,33 @@ export function useReportingStore() {
       return !inActive;
     });
   }, [baseTargetItems, activeTargetItems, searchQuery]);
+
+  const shipmentDateRange = useMemo(() => {
+    if (!shipmentData || shipmentData.length === 0) return '';
+    let minDate = '99999999';
+    let maxDate = '00000000';
+    let hasValidDate = false;
+    
+    shipmentData.forEach(row => {
+      const rawDate = row['출하일자'] || row['배송일자'] || row['주문일자'];
+      if (rawDate) {
+        const cleaned = formatExcelDate(rawDate);
+        if (cleaned && cleaned.length === 8) {
+          hasValidDate = true;
+          if (cleaned < minDate) minDate = cleaned;
+          if (cleaned > maxDate) maxDate = cleaned;
+        }
+      }
+    });
+    
+    if (!hasValidDate) return '';
+    
+    const formatDate = (dateStr) => {
+      return `${dateStr.substring(0, 4)}.${dateStr.substring(4, 6)}.${dateStr.substring(6, 8)}`;
+    };
+    
+    return `${formatDate(minDate)}~${formatDate(maxDate)}`;
+  }, [shipmentData]);
 
   // Compute fully processed reporting data reactive to files and target list
   const reportingData = useMemo(() => {
@@ -523,16 +589,39 @@ export function useReportingStore() {
     }));
   }, [reportingData]);
 
+  const toggleTransferComplete = (id) => {
+    setCompletedTransferIds(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(x => x !== id);
+      } else {
+        return [...prev, id];
+      }
+    });
+  };
+
+  const restoreCompletedTransfers = (ids) => {
+    if (!Array.isArray(ids)) {
+      alert('올바른 백업 파일 형식이 아닙니다.');
+      return;
+    }
+    setCompletedTransferIds(ids);
+    alert(`성공적으로 복구되었습니다. (총 ${ids.length}건)`);
+  };
+
   // Determine system status
   const isUploadComplete = shipmentData.length > 0 && clientInfoData.length > 0 && activeTargetItems.length > 0;
 
   return {
     // Files & Data state
-    shipmentFile,
+    shipmentFiles,
+    shipmentDateRange,
     clientInfoFile,
     targetItemsFile,
     transferFile,
     shipmentData,
+    completedTransferIds,
+    toggleTransferComplete,
+    restoreCompletedTransfers,
     clientInfoData,
     baseTargetItems,
     activeTargetItems,
