@@ -12,7 +12,7 @@ const HelpSection = () => {
         <div>
           <h3 className="text-slate-800 font-black text-sm mb-2">1. 연산 개요</h3>
           <p>
-            본 시스템은 <strong>ERP 원본 출하 내역</strong>과 <strong>거래처 사업자 정보</strong>, <strong>신고대상 품목 정보</strong>를 결합하여 일자별로 판매 기록을 자동 취합·계산하고 관세청 유통이력신고 업로드 전용 양식 엑셀 파일로 변환하여 줍니다.
+            본 시스템은 <strong>ERP 원본 출하 내역</strong>과 <strong>거래처 사업자 정보</strong>, <strong>신고대상 품목 정보</strong>를 기초 데이터로 등록하고, 이를 활용하여 <strong>양수내역 매칭기</strong>에서 양수내역과 출하내역을 매칭하고 검증할 수 있도록 지원합니다.
           </p>
         </div>
 
@@ -57,13 +57,12 @@ const HelpSection = () => {
         </div>
 
         <div className="border-t border-slate-100 pt-4">
-          <h3 className="text-slate-800 font-black text-sm mb-2">3. 데이터 정산 프로세스</h3>
+          <h3 className="text-slate-800 font-black text-sm mb-2">3. 데이터 매칭 프로세스</h3>
           <ol className="list-decimal list-inside space-y-1.5 text-slate-500 pl-1">
-            <li>각 엑셀 파일들을 화면에 드래그하여 업로드합니다.</li>
-            <li>출하내역 중에서 <span className="text-indigo-600 font-extrabold">대상품목에 등록된 품목코드</span> 자료만 필터링합니다.</li>
-            <li>출하거래처 코드를 바탕으로 거래처 기준정보 엑셀과 결합하여 <span className="font-extrabold">사업자번호, 주소, 상호</span> 정보를 바인딩합니다.</li>
-            <li>일자별, 거래처별, 품목별로 출하 수량을 계산하고, 1개 규격당 중량을 곱하여 <span className="text-indigo-600 font-extrabold">최종 거래 중량(kg)</span>을 산출합니다.</li>
-            <li>취합된 결과물을 품목별 카드에서 클릭하여 즉시 엑셀로 다운로드받습니다.</li>
+            <li>기초 데이터 업로드 탭에서 3가지 기초 자료(출하내역, 거래처 기준정보, 대상품목 기준) 엑셀 파일을 업로드합니다.</li>
+            <li>양수내역 매칭기 탭에서 매칭할 양수내역 엑셀 파일을 업로드합니다.</li>
+            <li>양수내역의 거래처 정보 및 품목코드를 기준으로 출하내역과 매칭을 진행하고 결과를 검토합니다.</li>
+            <li>매칭 완료된 결과를 건별로 엑셀 다운로드하거나, 한 번에 다운로드합니다.</li>
           </ol>
         </div>
       </div>

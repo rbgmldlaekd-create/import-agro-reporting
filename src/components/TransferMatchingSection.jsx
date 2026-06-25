@@ -2,6 +2,7 @@ import React from 'react';
 import Icon from './Icon';
 import Button from './Button';
 import { downloadStyledShipmentExcel } from '../utils/excelProcessor';
+import { ITEM_MAP } from '../utils/transferMatcher';
 
 const TransferMatchingSection = ({
   shipmentCount,
@@ -17,7 +18,8 @@ const TransferMatchingSection = ({
   completedTransferIds,
   toggleTransferComplete,
   restoreCompletedTransfers,
-  shipmentData
+  shipmentData,
+  activeTargetItems
 }) => {
   const { matchedRecords, transferSummary } = transferMatchedData || { matchedRecords: [], transferSummary: [] };
 
@@ -42,7 +44,36 @@ const TransferMatchingSection = ({
       return;
     }
 
-    downloadStyledShipmentExcel(shipmentData, completedShipmentIds);
+    // 1. Compile the target codes set
+    const targetCodes = new Set();
+    if (activeTargetItems) {
+      activeTargetItems.forEach(item => {
+        const code = String(item.품목코드 || '').trim();
+        if (code) {
+          targetCodes.add(code);
+          // Add mapped codes from ITEM_MAP if name matches
+          const name = String(item.품목명 || '').trim();
+          const mapped = ITEM_MAP[name] || [];
+          mapped.forEach(c => targetCodes.add(c));
+        }
+      });
+    }
+
+    // Handle shifting codes for '기타 냉동고추'
+    const hasGitaChili = Array.from(targetCodes).some(c => c === '250251466') || 
+                         (activeTargetItems && activeTargetItems.some(item => String(item.품목명 || '').includes('기타 냉동고추')));
+    if (hasGitaChili) {
+      targetCodes.add('120750227');
+      targetCodes.add('110350814');
+    }
+
+    // 2. Filter shipmentData to ONLY target items
+    const targetShipmentData = shipmentData.filter(row => {
+      const code = String(row['품목'] || row['품목코드'] || row['코드'] || '').trim();
+      return targetCodes.has(code);
+    });
+
+    downloadStyledShipmentExcel(targetShipmentData, completedShipmentIds);
   };
 
   const handleBackupData = () => {
@@ -178,7 +209,7 @@ const TransferMatchingSection = ({
           <h3 className="text-sm font-black text-slate-800 mb-1">양수내역 업로드</h3>
           <p className="text-[11px] text-slate-400 mb-4">포털에서 내려받은 양수내역 파일 (.xls)</p>
 
-          <div className={`relative border-2 border-dashed ${!isBaseReady ? 'border-slate-100 bg-slate-50/20 cursor-not-allowed' : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50 hover:bg-indigo-50/20 cursor-pointer'} rounded-xl p-6 text-center transition-all`}>
+          <div className={`relative border-2 border-dashed ${!isBaseReady ? 'border-slate-100 bg-slate-50/20 cursor-not-allowed' : (transferFile ? 'border-emerald-300 bg-emerald-50/10 hover:border-emerald-400 cursor-pointer' : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50 hover:bg-indigo-50/20 cursor-pointer')} rounded-xl p-6 text-center transition-all`}>
             <input
               type="file"
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -186,11 +217,13 @@ const TransferMatchingSection = ({
               disabled={!isBaseReady}
               onChange={handleTransferUpload}
             />
-            <Icon name="file-text" className={`w-8 h-8 ${!isBaseReady ? 'text-slate-300' : 'text-indigo-500'} mx-auto mb-2`} />
-            <span className="block text-xs font-bold text-slate-600">
-              {transferLoading ? '양수내역 분석 중...' : '파일 선택 또는 드래그'}
+            <Icon name="file-text" className={`w-8 h-8 ${!isBaseReady ? 'text-slate-300' : (transferFile ? 'text-emerald-500' : 'text-indigo-500')} mx-auto mb-2`} />
+            <span className="block text-xs font-bold text-slate-600 truncate px-2">
+              {transferLoading ? '양수내역 분석 중...' : (transferFile ? transferFile.name : '파일 선택 또는 드래그')}
             </span>
-            <span className="block text-[10px] text-slate-400 mt-1">'선택양수내역' 또는 '양수내역' 엑셀(.xls) 지원</span>
+            <span className="block text-[10px] text-slate-400 mt-1">
+              {!isBaseReady ? "'선택양수내역' 또는 '양수내역' 엑셀(.xls) 지원" : (transferFile ? '파일을 교체하려면 클릭' : "'선택양수내역' 또는 '양수내역' 엑셀(.xls) 지원")}
+            </span>
           </div>
 
           {transferFile && (
@@ -265,7 +298,7 @@ const TransferMatchingSection = ({
           <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
             <span className="text-[11px] text-slate-400 flex items-center gap-1">
               <Icon name="info" className="w-3.5 h-3.5 text-slate-400" />
-              Q열 거래일자보다 늦은 출하일자는 매칭에서 자동 제외됩니다.
+              Q열 거래일자보다 빠른 출하일자는 매칭에서 자동 제외됩니다.
             </span>
             <div className="flex items-center gap-2">
               <Button
@@ -365,7 +398,7 @@ const TransferMatchingSection = ({
                   const isUnder = row.matchedQty < row.targetQty;
                   const isCompleted = completedTransferIds && completedTransferIds.includes(row.id);
                   return (
-                    <tr key={row.id} className={`hover:bg-slate-50/50 transition-colors ${isCompleted ? 'bg-indigo-50/20' : ''}`}>
+                     <tr key={row.id} className={`hover:bg-slate-50/50 transition-colors ${isCompleted ? 'bg-yellow-50/70 border-l-2 border-yellow-400' : ''}`}>
                       <td className="py-3.5 px-4 text-center font-bold text-slate-400">{row.originalRowIndex}</td>
                       <td className="py-3.5 px-4 font-mono font-bold text-slate-600">{formatDate(row.targetDate)}</td>
                       <td className="py-3.5 px-4 font-mono font-bold text-slate-700">{row.declarationNo}</td>

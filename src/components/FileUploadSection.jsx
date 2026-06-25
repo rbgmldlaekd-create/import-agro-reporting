@@ -36,18 +36,21 @@ const FileUploadSection = ({
         <h3 className="text-sm font-black text-slate-800 mb-1">출하내역 업로드</h3>
         <p className="text-[11px] text-slate-400 mb-4">ERP 출하내역 엑셀 파일 (.xlsx, .csv)</p>
 
-        <div className="relative border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-xl p-6 bg-slate-50/50 hover:bg-indigo-50/20 text-center transition-all cursor-pointer">
+        <div className={`relative border-2 border-dashed ${shipmentFiles && shipmentFiles.length > 0 ? 'border-emerald-300 bg-emerald-50/10 hover:border-emerald-400' : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50 hover:bg-indigo-50/20'} rounded-xl p-6 text-center transition-all cursor-pointer`}>
           <input
             type="file"
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             accept=".xlsx, .xls, .csv"
+            multiple
             onChange={handleShipmentUpload}
           />
-          <Icon name="file-spreadsheet" className="w-8 h-8 text-indigo-500 mx-auto mb-2" />
+          <Icon name="file-spreadsheet" className={`w-8 h-8 ${shipmentFiles && shipmentFiles.length > 0 ? 'text-emerald-500' : 'text-indigo-500'} mx-auto mb-2`} />
           <span className="block text-xs font-bold text-slate-600">
-            {shipmentLoading ? '데이터 분석 중...' : '파일 선택 또는 드래그'}
+            {shipmentLoading ? '데이터 분석 중...' : (shipmentFiles && shipmentFiles.length > 0 ? `${shipmentFiles.length}개 파일 업로드됨` : '파일 선택 또는 드래그')}
           </span>
-          <span className="block text-[10px] text-slate-400 mt-1">xls, xlsx, csv 형식 지원</span>
+          <span className="block text-[10px] text-slate-400 mt-1">
+            {shipmentFiles && shipmentFiles.length > 0 ? '파일을 더 추가하려면 클릭' : 'xls, xlsx, csv 형식 지원'}
+          </span>
         </div>
 
         {/* Date Range Display */}
@@ -102,18 +105,20 @@ const FileUploadSection = ({
         <h3 className="text-sm font-black text-slate-800 mb-1">거래처 기준정보 업로드</h3>
         <p className="text-[11px] text-slate-400 mb-4">거래처 사업자 및 주소 맵핑용 (.xlsx)</p>
 
-        <div className="relative border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-xl p-6 bg-slate-50/50 hover:bg-indigo-50/20 text-center transition-all cursor-pointer">
+        <div className={`relative border-2 border-dashed ${clientInfoFile ? 'border-emerald-300 bg-emerald-50/10 hover:border-emerald-400' : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50 hover:bg-indigo-50/20'} rounded-xl p-6 text-center transition-all cursor-pointer`}>
           <input
             type="file"
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             accept=".xlsx, .xls"
             onChange={handleClientUpload}
           />
-          <Icon name="database" className="w-8 h-8 text-indigo-500 mx-auto mb-2" />
-          <span className="block text-xs font-bold text-slate-600">
-            {clientLoading ? '데이터 분석 중...' : '파일 선택 또는 드래그'}
+          <Icon name="database" className={`w-8 h-8 ${clientInfoFile ? 'text-emerald-500' : 'text-indigo-500'} mx-auto mb-2`} />
+          <span className="block text-xs font-bold text-slate-600 truncate px-2">
+            {clientLoading ? '데이터 분석 중...' : (clientInfoFile ? clientInfoFile.name : '파일 선택 또는 드래그')}
           </span>
-          <span className="block text-[10px] text-slate-400 mt-1">xls, xlsx 형식 지원</span>
+          <span className="block text-[10px] text-slate-400 mt-1">
+            {clientInfoFile ? '파일을 교체하려면 클릭' : 'xls, xlsx 형식 지원'}
+          </span>
         </div>
 
         {clientInfoFile && (
@@ -152,18 +157,20 @@ const FileUploadSection = ({
         <h3 className="text-sm font-black text-slate-800 mb-1">대상품목 기준 업로드</h3>
         <p className="text-[11px] text-slate-400 mb-4">신고 대상 농산물 및 무게 DB (.xlsx)</p>
 
-        <div className="relative border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-xl p-6 bg-slate-50/50 hover:bg-indigo-50/20 text-center transition-all cursor-pointer">
+        <div className={`relative border-2 border-dashed ${targetItemsFile ? 'border-emerald-300 bg-emerald-50/10 hover:border-emerald-400' : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50 hover:bg-indigo-50/20'} rounded-xl p-6 text-center transition-all cursor-pointer`}>
           <input
             type="file"
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             accept=".xlsx, .xls"
             onChange={handleTargetUpload}
           />
-          <Icon name="layers" className="w-8 h-8 text-indigo-500 mx-auto mb-2" />
-          <span className="block text-xs font-bold text-slate-600">
-            {targetLoading ? '데이터 분석 중...' : '파일 선택 또는 드래그'}
+          <Icon name="layers" className={`w-8 h-8 ${targetItemsFile ? 'text-emerald-500' : 'text-indigo-500'} mx-auto mb-2`} />
+          <span className="block text-xs font-bold text-slate-600 truncate px-2">
+            {targetLoading ? '데이터 분석 중...' : (targetItemsFile ? targetItemsFile.name : '파일 선택 또는 드래그')}
           </span>
-          <span className="block text-[10px] text-slate-400 mt-1">xls, xlsx 형식 지원</span>
+          <span className="block text-[10px] text-slate-400 mt-1">
+            {targetItemsFile ? '파일을 교체하려면 클릭' : 'xls, xlsx 형식 지원'}
+          </span>
         </div>
 
         {targetItemsFile && (

@@ -4,7 +4,6 @@ import Button from './components/Button';
 import Icon from './components/Icon';
 import FileUploadSection from './components/FileUploadSection';
 import TargetItemSection from './components/TargetItemSection';
-import ResultDownloadSection from './components/ResultDownloadSection';
 import TransferMatchingSection from './components/TransferMatchingSection';
 import HelpSection from './components/HelpSection';
 
@@ -25,7 +24,7 @@ function App() {
 
   // Sidebar Menu Configuration
   const menuItems = [
-    { id: 'dashboard', name: '유통이력 변환기', desc: '엑셀 파일 결합 및 다운로드', icon: 'pie-chart' },
+    { id: 'dashboard', name: '기초 데이터 업로드', desc: '출하·거래처·품목 기초 자료 등록', icon: 'file-spreadsheet' },
     { id: 'matching', name: '양수내역 매칭기', desc: '양수내역과 출하내역 매칭', icon: 'git-merge' },
     { id: 'items', name: '신고대상 품목관리', desc: '신고대상 농산물 DB 관리', icon: 'database' },
     { id: 'help', name: '사용 안내', desc: '프로그램 매뉴얼 가이드', icon: 'help-circle' }
@@ -41,10 +40,10 @@ function App() {
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
-                  🌾 수입농산물 유통이력신고 자동화
+                  📁 기초 데이터 업로드
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  관세청 신고대상 엑셀 양식을 신속하게 생성해 줍니다. 3가지 기초 자료 파일을 아래 구역에 등록해 주세요.
+                  양수내역 매칭 및 품목 관리에 필요한 3가지 기초 자료 파일을 아래 구역에 등록해 주세요.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -84,14 +83,6 @@ function App() {
               handleClientDelete={store.handleClientDelete}
               handleTargetDelete={store.handleTargetDelete}
             />
-
-            {/* Results / Compliant Downloads Area Component */}
-            <ResultDownloadSection
-              isUploadComplete={store.isUploadComplete}
-              processedItemsSummary={store.processedItemsSummary}
-              reportingData={store.reportingData}
-              handleLoadDemo={store.handleLoadDemo}
-            />
           </div>
         );
 
@@ -113,6 +104,7 @@ function App() {
               toggleTransferComplete={store.toggleTransferComplete}
               restoreCompletedTransfers={store.restoreCompletedTransfers}
               shipmentData={store.shipmentData}
+              activeTargetItems={store.activeTargetItems}
             />
           </div>
         );

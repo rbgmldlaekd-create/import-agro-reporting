@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect } from 'react';
 import {
   parseFile,
   parseFileAsAOA,
-  processReportingData,
   formatExcelDate
 } from '../utils/excelProcessor';
 import {
@@ -12,47 +11,33 @@ import {
   downloadSingleTransferExcel,
   downloadAllTransferExcel
 } from '../utils/transferMatcher';
-
-// Helper to safely parse JSON from localStorage
-const getStoredItem = (key, fallback) => {
-  try {
-    const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : fallback;
-  } catch (e) {
-    console.error(`Failed to parse localStorage key "${key}":`, e);
-    return fallback;
-  }
-};
+import {
+  dbGet,
+  dbSet,
+  dbDelete,
+  dbClear
+} from '../utils/db';
 
 export function useReportingStore() {
+  const [isLoaded, setIsLoaded] = useState(false);
+
   // File upload states (restored as virtual File-like objects with only name property)
-  const [shipmentFiles, setShipmentFiles] = useState(() => {
-    return getStoredItem('shipmentFiles', []);
-  });
-  const [clientInfoFile, setClientInfoFile] = useState(() => {
-    const name = localStorage.getItem('clientInfoFileName');
-    return name ? { name } : null;
-  });
-  const [targetItemsFile, setTargetItemsFile] = useState(() => {
-    const name = localStorage.getItem('targetItemsFileName');
-    return name ? { name } : null;
-  });
-  const [transferFile, setTransferFile] = useState(() => {
-    const name = localStorage.getItem('transferFileName');
-    return name ? { name } : null;
-  });
+  const [shipmentFiles, setShipmentFiles] = useState([]);
+  const [clientInfoFile, setClientInfoFile] = useState(null);
+  const [targetItemsFile, setTargetItemsFile] = useState(null);
+  const [transferFile, setTransferFile] = useState(null);
 
   // Parsed raw lists
-  const [shipmentData, setShipmentData] = useState(() => getStoredItem('shipmentData', []));
-  const [clientInfoData, setClientInfoData] = useState(() => getStoredItem('clientInfoData', []));
-  const [baseTargetItems, setBaseTargetItems] = useState(() => getStoredItem('baseTargetItems', []));
-  const [transferData, setTransferData] = useState(() => getStoredItem('transferData', []));
+  const [shipmentData, setShipmentData] = useState([]);
+  const [clientInfoData, setClientInfoData] = useState([]);
+  const [baseTargetItems, setBaseTargetItems] = useState([]);
+  const [transferData, setTransferData] = useState([]);
 
   // Active target items (managed and editable by user)
-  const [activeTargetItems, setActiveTargetItems] = useState(() => getStoredItem('activeTargetItems', []));
+  const [activeTargetItems, setActiveTargetItems] = useState([]);
 
   // Declaration completion states
-  const [completedTransferIds, setCompletedTransferIds] = useState(() => getStoredItem('completedTransferIds', []));
+  const [completedTransferIds, setCompletedTransferIds] = useState([]);
 
   // Form & Dropdown & Search states
   const [customCode, setCustomCode] = useState('');
@@ -70,105 +55,124 @@ export function useReportingStore() {
     target: false
   });
 
-  // Sync virtual file names to localStorage
+  // Load data from IndexedDB on mount
   useEffect(() => {
-    try {
-      localStorage.setItem('shipmentFiles', JSON.stringify(shipmentFiles));
-    } catch (e) {
-      console.error('Failed to save shipmentFiles to localStorage:', e);
+    async function initStore() {
+      try {
+        const storedShipmentFiles = await dbGet('shipmentFiles', []);
+        const storedClientInfoFileName = await dbGet('clientInfoFileName', null);
+        const storedTargetItemsFileName = await dbGet('targetItemsFileName', null);
+        const storedTransferFileName = await dbGet('transferFileName', null);
+        const storedShipmentData = await dbGet('shipmentData', []);
+        const storedClientInfoData = await dbGet('clientInfoData', []);
+        const storedBaseTargetItems = await dbGet('baseTargetItems', []);
+        const storedTransferData = await dbGet('transferData', []);
+        const storedActiveTargetItems = await dbGet('activeTargetItems', []);
+        const storedCompletedTransferIds = await dbGet('completedTransferIds', []);
+
+        setShipmentFiles(storedShipmentFiles);
+        if (storedClientInfoFileName) setClientInfoFile({ name: storedClientInfoFileName });
+        if (storedTargetItemsFileName) setTargetItemsFile({ name: storedTargetItemsFileName });
+        if (storedTransferFileName) setTransferFile({ name: storedTransferFileName });
+        setShipmentData(storedShipmentData);
+        setClientInfoData(storedClientInfoData);
+        setBaseTargetItems(storedBaseTargetItems);
+        setTransferData(storedTransferData);
+        setActiveTargetItems(storedActiveTargetItems);
+        setCompletedTransferIds(storedCompletedTransferIds);
+      } catch (e) {
+        console.error('Failed to restore data from IndexedDB:', e);
+      } finally {
+        setIsLoaded(true);
+      }
     }
-  }, [shipmentFiles]);
+    initStore();
+  }, []);
+
+  // Sync states to IndexedDB
+  useEffect(() => {
+    if (isLoaded) {
+      dbSet('shipmentFiles', shipmentFiles);
+    }
+  }, [shipmentFiles, isLoaded]);
 
   useEffect(() => {
-    if (clientInfoFile) {
-      localStorage.setItem('clientInfoFileName', clientInfoFile.name || '');
-    } else {
-      localStorage.removeItem('clientInfoFileName');
+    if (isLoaded) {
+      if (clientInfoFile) {
+        dbSet('clientInfoFileName', clientInfoFile.name || '');
+      } else {
+        dbDelete('clientInfoFileName');
+      }
     }
-  }, [clientInfoFile]);
+  }, [clientInfoFile, isLoaded]);
 
   useEffect(() => {
-    if (targetItemsFile) {
-      localStorage.setItem('targetItemsFileName', targetItemsFile.name || '');
-    } else {
-      localStorage.removeItem('targetItemsFileName');
+    if (isLoaded) {
+      if (targetItemsFile) {
+        dbSet('targetItemsFileName', targetItemsFile.name || '');
+      } else {
+        dbDelete('targetItemsFileName');
+      }
     }
-  }, [targetItemsFile]);
+  }, [targetItemsFile, isLoaded]);
 
   useEffect(() => {
-    if (transferFile) {
-      localStorage.setItem('transferFileName', transferFile.name || '');
-    } else {
-      localStorage.removeItem('transferFileName');
+    if (isLoaded) {
+      if (transferFile) {
+        dbSet('transferFileName', transferFile.name || '');
+      } else {
+        dbDelete('transferFileName');
+      }
     }
-  }, [transferFile]);
-
-  // Sync data arrays to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('shipmentData', JSON.stringify(shipmentData));
-    } catch (e) {
-      console.error('Failed to save shipmentData to localStorage:', e);
-    }
-  }, [shipmentData]);
+  }, [transferFile, isLoaded]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('clientInfoData', JSON.stringify(clientInfoData));
-    } catch (e) {
-      console.error('Failed to save clientInfoData to localStorage:', e);
+    if (isLoaded) {
+      dbSet('shipmentData', shipmentData);
     }
-  }, [clientInfoData]);
+  }, [shipmentData, isLoaded]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('baseTargetItems', JSON.stringify(baseTargetItems));
-    } catch (e) {
-      console.error('Failed to save baseTargetItems to localStorage:', e);
+    if (isLoaded) {
+      dbSet('clientInfoData', clientInfoData);
     }
-  }, [baseTargetItems]);
+  }, [clientInfoData, isLoaded]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('activeTargetItems', JSON.stringify(activeTargetItems));
-    } catch (e) {
-      console.error('Failed to save activeTargetItems to localStorage:', e);
+    if (isLoaded) {
+      dbSet('baseTargetItems', baseTargetItems);
     }
-  }, [activeTargetItems]);
+  }, [baseTargetItems, isLoaded]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('transferData', JSON.stringify(transferData));
-    } catch (e) {
-      console.error('Failed to save transferData to localStorage:', e);
+    if (isLoaded) {
+      dbSet('activeTargetItems', activeTargetItems);
     }
-  }, [transferData]);
+  }, [activeTargetItems, isLoaded]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('completedTransferIds', JSON.stringify(completedTransferIds));
-    } catch (e) {
-      console.error('Failed to save completedTransferIds to localStorage:', e);
+    if (isLoaded) {
+      dbSet('transferData', transferData);
     }
-  }, [completedTransferIds]);
+  }, [transferData, isLoaded]);
+
+  useEffect(() => {
+    if (isLoaded) {
+      dbSet('completedTransferIds', completedTransferIds);
+    }
+  }, [completedTransferIds, isLoaded]);
 
   // Reset all uploaded and stored data
-  const handleResetAllData = () => {
+  const handleResetAllData = async () => {
     if (!window.confirm('정말로 모든 업로드 데이터 및 관리 품목 리스트를 초기화하시겠습니까?')) {
       return;
     }
 
-    // Clear localStorage keys
-    localStorage.removeItem('shipmentFiles');
-    localStorage.removeItem('clientInfoFileName');
-    localStorage.removeItem('targetItemsFileName');
-    localStorage.removeItem('transferFileName');
-    localStorage.removeItem('shipmentData');
-    localStorage.removeItem('clientInfoData');
-    localStorage.removeItem('baseTargetItems');
-    localStorage.removeItem('activeTargetItems');
-    localStorage.removeItem('transferData');
-    localStorage.removeItem('completedTransferIds');
+    try {
+      await dbClear();
+    } catch (e) {
+      console.error(e);
+    }
 
     // Reset React States
     setShipmentFiles([]);
@@ -235,34 +239,44 @@ export function useReportingStore() {
     );
   }, [shipmentItems, shipmentSearchQuery]);
 
-  // Handle Shipment upload
+  // Handle Shipment upload (multiple files support)
   const handleShipmentUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
     setLoading(prev => ({ ...prev, shipment: true }));
     try {
-      const data = await parseFile(file);
-      const mappedData = data.map((row, idx) => ({ 
-        ...row, 
-        _id: `shipment-${Date.now()}-${idx}`,
-        _fileName: file.name 
-      }));
+      const newFilesList = [];
+      let newShipmentRows = [];
+
+      for (const file of files) {
+        const data = await parseFile(file);
+        const mappedData = data.map((row, idx) => ({ 
+          ...row, 
+          _id: `shipment-${Date.now()}-${file.name}-${idx}`,
+          _fileName: file.name 
+        }));
+        newFilesList.push({ name: file.name, count: data.length });
+        newShipmentRows = [...newShipmentRows, ...mappedData];
+      }
       
       // Update files list (overwrite if file name already exists)
       setShipmentFiles(prev => {
-        const filtered = prev.filter(f => f.name !== file.name);
-        return [...filtered, { name: file.name, count: data.length }];
+        const fileNamesToUpload = files.map(f => f.name);
+        const filtered = prev.filter(f => !fileNamesToUpload.includes(f.name));
+        return [...filtered, ...newFilesList];
       });
       
-      // Update data (overwrite rows associated with the same file name)
+      // Update data (overwrite rows associated with the same file names)
       setShipmentData(prev => {
-        const filtered = prev.filter(row => row._fileName !== file.name);
-        return [...filtered, ...mappedData];
+        const fileNamesToUpload = files.map(f => f.name);
+        const filtered = prev.filter(row => !fileNamesToUpload.includes(row._fileName));
+        return [...filtered, ...newShipmentRows];
       });
     } catch (err) {
       alert(`출하내역 파일 파싱 에러: ${err.message}`);
     } finally {
       setLoading(prev => ({ ...prev, shipment: false }));
+      e.target.value = ''; // Reset input to allow re-uploading same file if deleted
     }
   };
 
@@ -329,32 +343,23 @@ export function useReportingStore() {
       setShipmentFiles(prev => prev.filter(f => f.name !== fileName));
       setShipmentData(prev => prev.filter(row => row._fileName !== fileName));
     } else {
-      localStorage.removeItem('shipmentFiles');
-      localStorage.removeItem('shipmentData');
       setShipmentFiles([]);
       setShipmentData([]);
     }
   };
 
   const handleClientDelete = () => {
-    localStorage.removeItem('clientInfoFileName');
-    localStorage.removeItem('clientInfoData');
     setClientInfoFile(null);
     setClientInfoData([]);
   };
 
   const handleTargetDelete = () => {
-    localStorage.removeItem('targetItemsFileName');
-    localStorage.removeItem('baseTargetItems');
-    localStorage.removeItem('activeTargetItems');
     setTargetItemsFile(null);
     setBaseTargetItems([]);
     setActiveTargetItems([]);
   };
 
   const handleTransferDelete = () => {
-    localStorage.removeItem('transferFileName');
-    localStorage.removeItem('transferData');
     setTransferFile(null);
     setTransferData([]);
   };
@@ -541,15 +546,6 @@ export function useReportingStore() {
     return `${formatDate(minDate)}~${formatDate(maxDate)}`;
   }, [shipmentData]);
 
-  // Compute fully processed reporting data reactive to files and target list
-  const reportingData = useMemo(() => {
-    return processReportingData({
-      shipmentList: shipmentData,
-      clientInfoList: clientInfoData,
-      targetItemList: activeTargetItems
-    });
-  }, [shipmentData, clientInfoData, activeTargetItems]);
-
   const transferMatchedData = useMemo(() => {
     return matchTransferWithShipments({
       transferList: transferData,
@@ -558,36 +554,6 @@ export function useReportingStore() {
       targetItemList: activeTargetItems
     });
   }, [transferData, shipmentData, clientInfoData, activeTargetItems]);
-
-  // Aggregate results by item to display summaries with download links
-  const processedItemsSummary = useMemo(() => {
-    const summaries = {};
-    reportingData.forEach(row => {
-      const code = row.itemCode;
-      if (!summaries[code]) {
-        summaries[code] = {
-          code: code,
-          name: row.itemName,
-          recordCount: 0,
-          totalQty: 0,
-          totalWeight: 0,
-          minDate: '99999999',
-          maxDate: '00000000'
-        };
-      }
-      summaries[code].recordCount++;
-      summaries[code].totalQty += row.totalQty;
-      summaries[code].totalWeight += row.dlngWt;
-
-      if (row.dlngYmd < summaries[code].minDate) summaries[code].minDate = row.dlngYmd;
-      if (row.dlngYmd > summaries[code].maxDate) summaries[code].maxDate = row.dlngYmd;
-    });
-
-    return Object.values(summaries).map(item => ({
-      ...item,
-      totalWeight: Number(item.totalWeight.toFixed(3))
-    }));
-  }, [reportingData]);
 
   const toggleTransferComplete = (id) => {
     setCompletedTransferIds(prev => {
@@ -607,9 +573,6 @@ export function useReportingStore() {
     setCompletedTransferIds(ids);
     alert(`성공적으로 복구되었습니다. (총 ${ids.length}건)`);
   };
-
-  // Determine system status
-  const isUploadComplete = shipmentData.length > 0 && clientInfoData.length > 0 && activeTargetItems.length > 0;
 
   return {
     // Files & Data state
@@ -653,9 +616,6 @@ export function useReportingStore() {
     filteredShipmentItems,
     filteredActiveItems,
     searchedDbItems,
-    reportingData,
-    processedItemsSummary,
-    isUploadComplete,
     transferMatchedData,
 
     // Event handlers

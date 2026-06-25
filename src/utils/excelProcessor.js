@@ -25,6 +25,16 @@ export function formatExcelDate(val) {
   
   const strVal = String(val).trim();
   
+  // Handle string-represented Excel serial numbers (e.g. "45139.00060185")
+  const numVal = Number(strVal);
+  if (!isNaN(numVal) && numVal > 40000 && numVal < 60000) {
+    const date = new Date((numVal - 25569) * 86400 * 1000);
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${yyyy}${mm}${dd}`;
+  }
+  
   // Try pattern matching for common formats: YYYY/MM/DD, YYYY-MM-DD, YYYY.MM.DD
   const match = strVal.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (match) {
@@ -166,236 +176,7 @@ export function parseFileAsAOA(file) {
   });
 }
 
-/**
- * Combines shipment, client, and target item data.
- * Aggregates results by [Client + Date + Item Code]
- * Filters results to include only those matches that are in active target items.
- */
-export function processReportingData({ shipmentList, clientInfoList, targetItemList }) {
-  if (!shipmentList.length || !clientInfoList.length || !targetItemList.length) {
-    return [];
-  }
-  
-  // Index clients by '출하거래처' for rapid O(1) lookups
-  const clientMap = new Map();
-  clientInfoList.forEach(client => {
-    const key = String(client['출하거래처'] || '').trim();
-    if (key) {
-      clientMap.set(key, client);
-    }
-  });
-  
-  // Index regulated target items by '품목코드'
-  const targetItemMap = new Map();
-  targetItemList.forEach(item => {
-    const key = String(item.품목코드 || '').trim();
-    if (key) {
-      targetItemMap.set(key, item);
-    }
-  });
 
-  // Group shipment records by [Business No + Date + Item Code]
-  // Note: Aggregating by Business No is robust, but if a client doesn't exist, we fallback
-  const grouped = {};
-  
-  shipmentList.forEach(row => {
-    const rawItemCode = formatItemCode(row['품목']);
-    
-    // Check if this item is regulated/monitored
-    if (!targetItemMap.has(rawItemCode)) {
-      return; // Skip non-regulated item
-    }
-    
-    const targetItem = targetItemMap.get(rawItemCode);
-    const rawClientKey = String(row['출하거래처'] || '').trim();
-    const clientRecord = clientMap.get(rawClientKey);
-    
-    if (!clientRecord) {
-      // Skip shipment with missing client profile
-      return;
-    }
-    
-    const businessNo = formatBusinessNo(clientRecord["사업자등록번호('-'제외)"] || clientRecord["사업자등록번호"]);
-    const rawDate = row['출하일자'] || row['배송일자'] || row['주문일자'];
-    const cleanedDate = formatExcelDate(rawDate);
-    
-    if (!cleanedDate || !businessNo) {
-      return; // Missing essential keys
-    }
-    
-    const quantity = parseQuantity(row);
-    
-    // Grouping composite key
-    const groupKey = `${businessNo}_${cleanedDate}_${rawItemCode}`;
-    
-    if (!grouped[groupKey]) {
-      grouped[groupKey] = {
-        entrpsTyNm: String(clientRecord['거래유형'] || '').trim(),
-        bsnmNo: businessNo,
-        entrpsNm: String(clientRecord['상호(성명)'] || clientRecord['상호'] || clientRecord['출하거래처명'] || '').trim(),
-        bassAdres: String(clientRecord['주소(판매장소)'] || clientRecord['주소'] || '').trim(),
-        dlngYmd: cleanedDate,
-        itemCode: rawItemCode,
-        itemName: targetItem.품목명,
-        unitWeight: Number(targetItem.단위무게 || 0),
-        totalQty: 0
-      };
-    }
-    
-    grouped[groupKey].totalQty += quantity;
-  });
-  
-  // Calculate final total weights
-  const results = Object.values(grouped).map(group => {
-    const dlngWt = Number((group.totalQty * group.unitWeight).toFixed(3)); // weight in kg
-    return {
-      ...group,
-      dlngWt
-    };
-  });
-  
-  return results;
-}
-
-/**
- * Creates and triggers the browser download for a dual-header Excel sheet.
- */
-export function downloadExcelForItem(itemCode, itemName, reportingData) {
-  const filteredData = reportingData.filter(d => d.itemCode === itemCode);
-  
-  if (!filteredData.length) {
-    alert('해당 품목에 신고 가능한 거래 내역이 존재하지 않습니다.');
-    return;
-  }
-  
-  // Group filteredData by date (dlngYmd)
-  const dateGroups = {};
-  filteredData.forEach(d => {
-    if (!dateGroups[d.dlngYmd]) {
-      dateGroups[d.dlngYmd] = [];
-    }
-    dateGroups[d.dlngYmd].push(d);
-  });
-  
-  const dates = Object.keys(dateGroups).sort();
-  
-  const formatDateWithDots = (dateStr) => {
-    if (!dateStr || dateStr.length !== 8) return dateStr;
-    return `${dateStr.substring(0, 4)}.${dateStr.substring(4, 6)}.${dateStr.substring(6, 8)}`;
-  };
-  
-  // Process and download each day as a separate Excel file
-  dates.forEach(dateStr => {
-    const dailyData = dateGroups[dateStr];
-    const dateFormatted = formatDateWithDots(dateStr);
-    
-    // Compliant Headers
-    const headerRow1 = [
-      'entrpsTyNm', 'bsnmNo', 'vhcleNo', 'entrpsNm', 'zipNo', 'bassAdres',
-      'rprsvNm', 'tlphonNo', 'rprsvMoblphonTelno', 'dlngYmd', 'dlngQyu',
-      'dlngCoQy', 'dlngWt', 'note1', 'note2', 'resn'
-    ];
-    
-    const headerRow2 = [
-      '거래유형', '사업자등록번호(\'-\'제외)', '차량등록번호', '상호(성명)', '우편번호', '주소(판매장소)',
-      '대표자', '전화번호(\'-\'제외)', '휴대폰번호(\'-\'제외)', '거래일자(\'-\'제외)', '1개당무게(kg)',
-      '개수(개)', '총무게(kg)', '비고1', '비고2', '사유'
-    ];
-    
-    // Map rows as sparse arrays to omit empty columns completely (matching reference XML structure cell-for-cell)
-    const dataRows = dailyData.map(row => {
-      const arr = [];
-      arr[0] = row.entrpsTyNm;
-      
-      // bsnmNo를 문자열 타입으로 변환 ('-' 제외)
-      arr[1] = row.bsnmNo ? String(row.bsnmNo).replace(/\D/g, '') : '';
-      
-      // arr[2] (vhcleNo) is omitted
-      arr[3] = row.entrpsNm;
-      // arr[4] (zipNo) is omitted
-      arr[5] = row.bassAdres;
-      // arr[6] (rprsvNm), arr[7] (tlphonNo), arr[8] (rprsvMoblphonTelno) are omitted
-      
-      // dlngYmd를 문자열 타입으로 변환
-      arr[9] = row.dlngYmd ? String(row.dlngYmd).replace(/\D/g, '') : '';
-      
-      // arr[10] (dlngQyu), arr[11] (dlngCoQy) are omitted
-      
-      // dlngWt를 숫자 타입으로 변환
-      arr[12] = row.dlngWt !== undefined && row.dlngWt !== null ? Number(row.dlngWt) : '';
-      
-      // arr[13] (note1), arr[14] (note2), arr[15] (resn) are omitted
-      return arr;
-    });
-    
-    const sheetData = [headerRow1, headerRow2, ...dataRows];
-    
-    // Write Workbook
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(sheetData);
-    
-    // Set explicit column widths to prevent Excel from visually truncating business numbers or headers
-    ws['!cols'] = [
-      { wch: 15 }, // entrpsTyNm / 거래유형
-      { wch: 28 }, // bsnmNo / 사업자등록번호('-'제외)
-      { wch: 15 }, // vhcleNo / 차량등록번호
-      { wch: 30 }, // entrpsNm / 상호(성명)
-      { wch: 12 }, // zipNo / 우편번호
-      { wch: 50 }, // bassAdres / 주소(판매장소)
-      { wch: 12 }, // rprsvNm / 대표자
-      { wch: 20 }, // tlphonNo / 전화번호('-'제외)
-      { wch: 20 }, // rprsvMoblphonTelno / 휴대폰번호('-'제외)
-      { wch: 18 }, // dlngYmd / 거래일자('-'제외)
-      { wch: 15 }, // dlngQyu / 1개당무게(kg)
-      { wch: 12 }, // dlngCoQy / 개수(개)
-      { wch: 15 }, // dlngWt / 총무게(kg)
-      { wch: 15 }, // note1 / 비고1
-      { wch: 15 }, // note2 / 비고2
-      { wch: 15 }  // resn / 사유
-    ];
-  
-    // Explicitly force business registration numbers and dates to be treated as strings ('s')
-    // This prevents Excel from formatting large number sequences as scientific notation or trimming digits
-    // Total weights (dlngWt) are treated as numbers ('n')
-    for (let i = 2; i < sheetData.length; i++) {
-      const cellRefB = XLSX.utils.encode_cell({ r: i, c: 1 }); // Column B (bsnmNo)
-      if (!ws[cellRefB]) {
-        ws[cellRefB] = { t: 's', v: '' };
-      } else {
-        ws[cellRefB].t = 's';
-        ws[cellRefB].v = String(ws[cellRefB].v);
-      }
-      
-      const cellRefJ = XLSX.utils.encode_cell({ r: i, c: 9 }); // Column J (dlngYmd)
-      if (!ws[cellRefJ]) {
-        ws[cellRefJ] = { t: 's', v: '' };
-      } else {
-        ws[cellRefJ].t = 's';
-        ws[cellRefJ].v = String(ws[cellRefJ].v);
-      }
-  
-      const cellRefM = XLSX.utils.encode_cell({ r: i, c: 12 }); // Column M (dlngWt)
-      if (!ws[cellRefM]) {
-        ws[cellRefM] = { t: 'n', v: '' };
-      } else {
-        ws[cellRefM].t = 'n';
-        ws[cellRefM].v = ws[cellRefM].v !== '' ? Number(ws[cellRefM].v) : '';
-      }
-    }
-  
-    XLSX.utils.book_append_sheet(wb, ws, '거래내역');
-    
-    // Calculate total weight in kg for this day
-    const totalWeight = dailyData.reduce((acc, curr) => acc + (curr.dlngWt || 0), 0);
-    const totalWeightFormatted = Number(totalWeight.toFixed(3));
-  
-    // Set filename
-    const fileName = `${dateFormatted}_${itemName}_${totalWeightFormatted.toLocaleString()}kg_유통이력신고 엑셀업로드.xlsx`;
-    
-    // Trigger file download
-    XLSX.writeFile(wb, fileName);
-  });
-}
 
 /**
  * Downloads shipment data as an HTML-based Excel file with yellow highlighted rows for completed declarations.
@@ -406,43 +187,68 @@ export function downloadStyledShipmentExcel(shipmentData, completedShipmentIds) 
     return;
   }
 
-  // Get all unique keys in shipmentData (excluding system metadata keys)
-  const allKeys = [];
-  shipmentData.forEach(row => {
-    Object.keys(row).forEach(key => {
-      if (key !== '_id' && key !== '_fileName' && !allKeys.includes(key)) {
-        allKeys.push(key);
-      }
-    });
-  });
+  // Get all unique keys in shipmentData using the exact order of the reference template
+  const allKeys = [
+    '주문번호', '주문항번', '주문일자', '출하일자', '주문진행상태', '출하거래처', '출하거래처명',
+    '출하거래처약칭', '담당자', '품목', '품목명', '규격', '수주수량', '단가', '부가세',
+    '확정금액', '확정부가세', '확정총금액', '원화금액', '부가세유형', '입력경로', '수주번호',
+    '수주항번', '납기일', '수주단위', '비고', '확정수량', '회사', '공장', '담당호차',
+    '담당호차명', 'CBM', '로케이션'
+  ];
+
+  // Helper function to define individual cell style (alignments, mso-number-format, completed yellow highlight)
+  const getCellStyle = (key, isCompleted) => {
+    const centerCols = ['주문일자', '출하일자', '납기일', '주문진행상태', '출하거래처', '품목', '주문항번', '수주항번', '수주단위', '회사', '공장', '담당호차', '로케이션'];
+    const rightCols = ['수주수량', '단가', '부가세', '확정금액', '확정부가세', '확정총금액', '원화금액', '확정수량', 'CBM'];
+    
+    let align = 'left';
+    let numFormat = 'mso-number-format:\'\\@\';'; // Treat as text to preserve leading zeros in codes
+    
+    if (centerCols.includes(key)) {
+      align = 'center';
+    } else if (rightCols.includes(key)) {
+      align = 'right';
+      numFormat = 'mso-number-format:\'\\#\\,\\#\\#0\';'; // Formatted numeric
+    }
+    
+    const bgColor = isCompleted ? 'background-color: #FEF08A;' : '';
+    
+    // Inline borders, font family, size and padding to bypass Excel CSS parser limits
+    const baseStyle = 'border: 1px solid #D9D9D9; padding: 5px; font-size: 9pt; font-family: \'굴림\', \'Gulim\', \'GulimChe\', sans-serif;';
+    
+    return {
+      style: `style="${baseStyle} text-align: ${align}; ${numFormat} ${bgColor}"`,
+      align: align
+    };
+  };
 
   // Generate HTML table compatible with Excel
   let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 <style>
-  table { border-collapse: collapse; }
-  th { background-color: #E2E8F0; font-weight: bold; border: 1px solid #CBD5E1; padding: 6px; font-size: 11px; font-family: sans-serif; }
-  td { border: 1px solid #CBD5E1; padding: 6px; font-size: 11px; font-family: sans-serif; mso-number-format:"\\@"; }
+  * {
+    font-family: '굴림', 'Gulim', 'GulimChe', sans-serif !important;
+  }
 </style>
 </head>
 <body>
-<table>
+<table style="border-collapse: collapse;">
   <thead>
     <tr>
-      ${allKeys.map(key => `<th>${key}</th>`).join('')}
+      ${allKeys.map(key => `<th style="background-color: rgb(150, 150, 150); color: #FFFFFF; font-weight: bold; border: 1px solid #7F7F7F; padding: 5px; font-size: 9pt; font-family: '굴림', 'Gulim', 'GulimChe', sans-serif; text-align: center;">${key}</th>`).join('')}
     </tr>
   </thead>
   <tbody>`;
 
   shipmentData.forEach(row => {
     const isCompleted = completedShipmentIds.has(row._id);
-    const rowStyle = isCompleted ? ' style="background-color: #FEF08A;"' : ''; // soft yellow highlight
     
-    html += `\n    <tr${rowStyle}>`;
+    html += `\n    <tr>`;
     allKeys.forEach(key => {
       const val = row[key] !== undefined && row[key] !== null ? row[key] : '';
-      html += `<td>${val}</td>`;
+      const cellStyle = getCellStyle(key, isCompleted);
+      html += `<td align="${cellStyle.align}" ${cellStyle.style}>${val}</td>`;
     });
     html += `</tr>`;
   });

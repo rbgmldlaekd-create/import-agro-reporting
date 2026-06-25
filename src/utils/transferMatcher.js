@@ -20,7 +20,8 @@ const FALLBACK_WEIGHT_MAP = {
   '250251466': 0.34,
   '120851542': 0.2,
   '110350814': 1.0,
-  '120951580': 10.0
+  '120951580': 10.0,
+  '120750227': 1.0
 };
 
 /**
@@ -157,7 +158,7 @@ export function parseTransferXls(rows) {
 }
 
 /**
- * 선입선출(FIFO) 규칙 및 일자 제약 조건(출하일자 <= 거래일자)을 활용해 양수내역과 출하내역을 매칭합니다.
+ * 선입선출(FIFO) 규칙 및 일자 제약 조건(출하일자 >= 거래일자)을 활용해 양수내역과 출하내역을 매칭합니다.
  */
 export function matchTransferWithShipments({
   transferList,
@@ -236,8 +237,43 @@ export function matchTransferWithShipments({
     shipmentPool[code].sort((a, b) => a.date.localeCompare(b.date));
   });
 
-  // 4. 양수내역 리스트 복제 및 날짜 정렬 (오름차순 및 원래 행 기준 안정한 정렬)
-  const sortedTransfers = [...transferList].map(t => ({
+  // 4. 양수내역 리스트 중 대상품목이 아닌 것 필터링 및 복제/정렬
+  const targetCodes = new Set(Array.from(weightMap.keys()));
+
+  const filteredTransfers = transferList.filter(t => {
+    const itemName = t.itemName;
+    
+    // 1) 대상품목명에 포함되는지 검사
+    const isTargetByName = targetItemList.some(item => {
+      const name = String(item.품목명 || '').trim();
+      return name && (itemName.includes(name) || name.includes(itemName));
+    });
+    if (isTargetByName) return true;
+
+    // 2) 매핑된 코드가 대상품목코드에 포함되는지 검사
+    let matchedCodes = ITEM_MAP[itemName] || [];
+    if (matchedCodes.length === 0) {
+      const foundKey = Object.keys(ITEM_MAP).find(k => itemName.startsWith(k) || k.startsWith(itemName));
+      if (foundKey) {
+        matchedCodes = ITEM_MAP[foundKey];
+      }
+    }
+    if (matchedCodes.length === 0) {
+      matchedCodes = [itemName];
+    }
+
+    const isTargetByCode = matchedCodes.some(code => targetCodes.has(code));
+    if (isTargetByCode) return true;
+
+    // 3) '기타 냉동고추' 우회코드 및 변형품목명 검사
+    if (itemName.includes('기타 냉동고추') && (targetCodes.has('250251466') || targetCodes.has('120750227') || targetCodes.has('110350814'))) {
+      return true;
+    }
+
+    return false;
+  });
+
+  const sortedTransfers = filteredTransfers.map(t => ({
     ...t,
     matchedQty: 0,
     matchedDetails: []
@@ -269,6 +305,16 @@ export function matchTransferWithShipments({
       matchedCodes = [itemName];
     }
 
+    // '기타 냉동고추'(코드 250251466) 품목 중 거래량 소수점 여부에 따른 예외 매핑 규칙
+    if (matchedCodes.includes('250251466') || itemName.includes('기타 냉동고추')) {
+      const isDecimal = transfer.targetQty % 1 !== 0;
+      if (isDecimal) {
+        matchedCodes = ['120750227']; // 소수점인 경우: 크러쉬드페퍼(레드페퍼)
+      } else {
+        matchedCodes = ['110350814']; // 소수점이 아닌 경우: (종료)건고추(베트남)
+      }
+    }
+
     // 대상 품목코드들의 출하 내역들을 가져와서 날짜순 병합
     const availableShipments = [];
     matchedCodes.forEach(code => {
@@ -286,8 +332,8 @@ export function matchTransferWithShipments({
       if (remTarget <= 0) break;
       if (shipment.remWeightKg <= 0) continue;
       
-      // 제약조건: 출하일자(shipment.date)가 양수 거래일자(transfer.targetDate)보다 크면(뒷날이면) 안됨
-      if (shipment.date > transfer.targetDate) {
+      // 제약조건: 출하일자(shipment.date)가 양수 거래일자(transfer.targetDate)보다 빠르면 안됨 (출하일자 >= 양수 거래일자)
+      if (shipment.date < transfer.targetDate) {
         continue; 
       }
 
@@ -320,8 +366,8 @@ export function matchTransferWithShipments({
         bassAdres: String(client['주소(판매장소)'] || client['주소'] || '').trim(),
         dlngYmd: detail.date,
         dlngWt: detail.matchedWt,
-        note1: `양수:${transfer.declarationNo} [번호:${transfer.serialNo}]`,
-        note2: `품목:${transfer.itemName}`
+        note1: '',
+        note2: ''
       });
     });
   });
@@ -493,8 +539,8 @@ export function downloadSingleTransferExcel(transfer) {
     // 총무게(dlngWt) -> 숫자 타입
     arr[12] = detail.matchedWt !== undefined && detail.matchedWt !== null ? Number(detail.matchedWt) : '';
     
-    arr[13] = `양수:${transfer.declarationNo} [번호:${transfer.serialNo}]`;
-    arr[14] = `품목:${transfer.itemName}`;
+    arr[13] = '';
+    arr[14] = '';
     return arr;
   });
 
