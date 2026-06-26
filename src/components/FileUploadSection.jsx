@@ -64,7 +64,7 @@ const FileUploadSection = ({
         {/* Uploaded Files List */}
         {shipmentFiles && shipmentFiles.length > 0 && (
           <div className="mt-2.5 space-y-1.5 max-h-72 overflow-y-auto pr-1">
-            {shipmentFiles.map((file) => (
+            {[...shipmentFiles].sort((a, b) => b.name.localeCompare(a.name)).map((file) => (
               <div 
                 key={file.name} 
                 className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between text-[11px] hover:border-slate-300 transition-colors"
