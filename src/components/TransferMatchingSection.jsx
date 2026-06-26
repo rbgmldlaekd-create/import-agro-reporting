@@ -23,6 +23,23 @@ const TransferMatchingSection = ({
 }) => {
   const { matchedRecords, transferSummary } = transferMatchedData || { matchedRecords: [], transferSummary: [] };
 
+  const getCodeName = (code) => {
+    const found = activeTargetItems?.find(item => String(item.품목코드).trim() === String(code).trim());
+    if (found) return found.품목명;
+    
+    const nameMap = {
+      '120751520': '땅콩분태',
+      '120450343': '고추가루(굵은)',
+      '120450344': '고추가루(고운)',
+      '120851542': '냉동고추(익도홍)',
+      '110350814': '건고추(베트남)',
+      '120951580': '배추김치',
+      '120750227': '크러쉬드페퍼',
+      '250251466': '기타 냉동고추'
+    };
+    return nameMap[code] || '';
+  };
+
   const handleDownloadCompletedShipments = () => {
     if (!completedTransferIds || completedTransferIds.length === 0) {
       alert('신고 완료로 체크된 항목이 없습니다. 목록에서 신고완료 처리를 먼저 진행해 주세요.');
@@ -65,6 +82,14 @@ const TransferMatchingSection = ({
     if (hasGitaChili) {
       targetCodes.add('120750227');
       targetCodes.add('110350814');
+    }
+
+    // Handle shifting codes for '냉동고추(익도홍)'
+    const hasIkdohong = Array.from(targetCodes).some(c => c === '120851542') || 
+                         (activeTargetItems && activeTargetItems.some(item => String(item.품목명 || '').includes('냉동고추(익도홍)')));
+    if (hasIkdohong) {
+      targetCodes.add('120450343');
+      targetCodes.add('120450344');
     }
 
     // 2. Filter shipmentData to ONLY target items
@@ -360,6 +385,145 @@ const TransferMatchingSection = ({
                 className="hidden"
                 onChange={handleRestoreData}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 품목 매핑 기준 및 예외 규칙 현황 대시보드 */}
+      {transferData.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 relative overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500"></div>
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+              <Icon name="layers" className="w-3.5 h-3.5 text-indigo-500" />
+              ⚙️ 양수 ⇄ 출하 품목 매핑 및 예외 매칭 규칙 현황
+            </h4>
+            <span className="text-[9px] text-slate-400 font-extrabold bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-lg">
+              FIFO 자동 배분 기준
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-[11px]">
+            {/* 기본 1:1 매핑 카드 */}
+            <div className="bg-slate-50/50 border border-slate-150 rounded-xl p-3.5 space-y-2">
+              <div className="font-extrabold text-slate-700 flex items-center gap-1.5 pb-1.5 border-b border-slate-100">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                기본 1:1 매핑 품목
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-100">
+                  <span className="font-bold text-slate-700">볶은 알땅콩(파쇄)</span>
+                  <div className="flex flex-col items-end">
+                    <span className="font-mono font-bold text-slate-500 bg-slate-50 border border-slate-150 px-1.5 py-0.5 rounded">120751520</span>
+                    <span className="text-[9px] text-slate-400 mt-0.5 font-bold">{getCodeName('120751520')}</span>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-100">
+                  <span className="font-bold text-slate-700">꼭지와 씨 제거 건고추</span>
+                  <div className="flex flex-col items-end">
+                    <span className="font-mono font-bold text-slate-500 bg-slate-50 border border-slate-150 px-1.5 py-0.5 rounded">110350814</span>
+                    <span className="text-[9px] text-slate-400 mt-0.5 font-bold">{getCodeName('110350814')}</span>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-100">
+                  <span className="font-bold text-slate-700">배추김치(포기김치)</span>
+                  <div className="flex flex-col items-end">
+                    <span className="font-mono font-bold text-slate-500 bg-slate-50 border border-slate-150 px-1.5 py-0.5 rounded">120951580</span>
+                    <span className="text-[9px] text-slate-400 mt-0.5 font-bold">{getCodeName('120951580')}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 다중 1:N 매핑 카드 */}
+            <div className="bg-slate-50/50 border border-slate-150 rounded-xl p-3.5 space-y-2">
+              <div className="font-extrabold text-slate-700 flex items-center gap-1.5 pb-1.5 border-b border-slate-100">
+                <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                다중 1:N 매핑 품목
+              </div>
+              <div className="space-y-1.5">
+                <div className="bg-white p-2.5 rounded-lg border border-slate-100 space-y-1.5">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-slate-700">냉동고추(금탑)</span>
+                    <span className="text-[9px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full font-bold">2개 코드 병합</span>
+                  </div>
+                  <div className="flex flex-col gap-1.5 pt-1.5 border-t border-dashed border-slate-100 font-mono text-[10px] text-slate-500">
+                    <div className="flex justify-between items-center">
+                      <span>• 고추가루(굵은)</span>
+                      <div className="flex flex-col items-end">
+                        <span className="font-bold">120450343</span>
+                        <span className="text-[9px] text-slate-400 font-bold">{getCodeName('120450343')}</span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center mt-1">
+                      <span>• 고추가루(고운)</span>
+                      <div className="flex flex-col items-end">
+                        <span className="font-bold">120450344</span>
+                        <span className="text-[9px] text-slate-400 font-bold">{getCodeName('120450344')}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 조건부 / 소수점 예외 매핑 카드 */}
+            <div className="bg-slate-50/50 border border-slate-150 rounded-xl p-3.5 space-y-2">
+              <div className="font-extrabold text-slate-700 flex items-center gap-1.5 pb-1.5 border-b border-slate-100">
+                <span className="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
+                거래량 소수점 조건 매핑
+              </div>
+              
+              <div className="space-y-2">
+                {/* 냉동고추(익도홍) */}
+                <div className="bg-white p-2 rounded-lg border border-slate-100 space-y-1">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-indigo-700">냉동고추(익도홍)</span>
+                    <span className="text-[8px] text-indigo-600 bg-indigo-50 px-1.5 py-0.2 rounded-full font-extrabold">규칙 추가</span>
+                  </div>
+                  <div className="text-[10px] space-y-1.5 pt-1 border-t border-slate-100">
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>정수 (소수점 없음)</span>
+                      <div className="flex flex-col items-end">
+                        <span className="font-mono text-[9px] bg-indigo-50 text-indigo-700 font-bold px-1 rounded">120450343/44</span>
+                        <span className="text-[8px] text-slate-400 font-bold mt-0.5 text-right">{getCodeName('120450343') || '고추가루'} / {getCodeName('120450344') || '고추가루'}</span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600 mt-1">
+                      <span>실수 (소수점 존재)</span>
+                      <div className="flex flex-col items-end">
+                        <span className="font-mono text-[9px] bg-slate-100 text-slate-500 font-bold px-1 rounded">120851542</span>
+                        <span className="text-[8px] text-slate-400 font-bold mt-0.5">{getCodeName('120851542') || '냉동고추(익도홍)'}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 기타 냉동고추 */}
+                <div className="bg-white p-2 rounded-lg border border-slate-100 space-y-1">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-slate-700">기타 냉동고추</span>
+                    <span className="text-[8px] text-slate-400 font-bold">기본 규칙</span>
+                  </div>
+                  <div className="text-[10px] space-y-1.5 pt-1 border-t border-slate-100">
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>정수 (소수점 없음)</span>
+                      <div className="flex flex-col items-end">
+                        <span className="font-mono text-[9px] bg-slate-100 text-slate-600 font-bold px-1 rounded">110350814</span>
+                        <span className="text-[8px] text-slate-400 font-bold mt-0.5">{getCodeName('110350814') || '건고추(베트남)'}</span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600 mt-1">
+                      <span>실수 (소수점 존재)</span>
+                      <div className="flex flex-col items-end">
+                        <span className="font-mono text-[9px] bg-slate-100 text-slate-600 font-bold px-1 rounded">120750227</span>
+                        <span className="text-[8px] text-slate-400 font-bold mt-0.5">{getCodeName('120750227') || '크러쉬드페퍼'}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

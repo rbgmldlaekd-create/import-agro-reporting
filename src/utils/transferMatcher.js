@@ -270,6 +270,11 @@ export function matchTransferWithShipments({
       return true;
     }
 
+    // 4) '냉동고추(익도홍)' 우회코드 및 변형품목명 검사
+    if (itemName.includes('냉동고추(익도홍)') && (targetCodes.has('120851542') || targetCodes.has('120450343') || targetCodes.has('120450344'))) {
+      return true;
+    }
+
     return false;
   });
 
@@ -312,6 +317,14 @@ export function matchTransferWithShipments({
         matchedCodes = ['120750227']; // 소수점인 경우: 크러쉬드페퍼(레드페퍼)
       } else {
         matchedCodes = ['110350814']; // 소수점이 아닌 경우: (종료)건고추(베트남)
+      }
+    }
+
+    // '냉동고추(익도홍)'(코드 120851542) 품목 중 거래량 소수점 여부에 따른 예외 매핑 규칙
+    if (matchedCodes.includes('120851542') || itemName.includes('냉동고추(익도홍)')) {
+      const isDecimal = transfer.targetQty % 1 !== 0;
+      if (!isDecimal) {
+        matchedCodes = ['120450343', '120450344']; // 소수점이 없는 경우: 고추가루(굵은/고운)
       }
     }
 
