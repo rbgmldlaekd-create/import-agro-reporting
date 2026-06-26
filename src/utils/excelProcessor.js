@@ -246,7 +246,16 @@ export function downloadStyledShipmentExcel(shipmentData, completedShipmentIds) 
     
     html += `\n    <tr>`;
     allKeys.forEach(key => {
-      const val = row[key] !== undefined && row[key] !== null ? row[key] : '';
+      let val = row[key] !== undefined && row[key] !== null ? row[key] : '';
+      
+      // 날짜 컬럼(주문일자, 출하일자, 납기일) 포맷팅 예외 처리 (YYYY/MM/DD 형식 적용)
+      if (['주문일자', '출하일자', '납기일'].includes(key) && val) {
+        const cleaned = formatExcelDate(val);
+        if (cleaned && cleaned.length === 8) {
+          val = `${cleaned.substring(0, 4)}/${cleaned.substring(4, 6)}/${cleaned.substring(6, 8)}`;
+        }
+      }
+      
       const cellStyle = getCellStyle(key, isCompleted);
       html += `<td align="${cellStyle.align}" ${cellStyle.style}>${val}</td>`;
     });

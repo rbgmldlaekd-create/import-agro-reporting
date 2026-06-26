@@ -123,9 +123,17 @@ const TransferMatchingSection = ({
     const dd = String(now.getDate()).padStart(2, '0');
     const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
     const dayOfWeek = weekDays[now.getDay()];
-    const dateStr = `${yyyy}.${mm}.${dd}(${dayOfWeek})`;
+    
+    const ampm = now.getHours() >= 12 ? 'PM' : 'AM';
+    let hours12 = now.getHours() % 12;
+    hours12 = hours12 ? hours12 : 12;
+    const hoursStr = String(hours12).padStart(2, '0');
+    const minutesStr = String(now.getMinutes()).padStart(2, '0');
+    const secondsStr = String(now.getSeconds()).padStart(2, '0');
+    
+    const dateStr = `${yyyy}.${mm}.${dd}(${dayOfWeek})_${ampm}_${hoursStr}.${minutesStr}.${secondsStr}`;
 
-    link.setAttribute('download', `${dateStr} 작업완료 주문현황.json`);
+    link.setAttribute('download', `${dateStr}_작업완료 주문현황.json`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

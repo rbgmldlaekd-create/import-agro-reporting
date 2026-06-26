@@ -63,14 +63,14 @@ const FileUploadSection = ({
 
         {/* Uploaded Files List */}
         {shipmentFiles && shipmentFiles.length > 0 && (
-          <div className="mt-2.5 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+          <div className="mt-2.5 space-y-1.5 max-h-72 overflow-y-auto pr-1">
             {shipmentFiles.map((file) => (
               <div 
                 key={file.name} 
                 className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between text-[11px] hover:border-slate-300 transition-colors"
               >
                 <div className="flex items-center gap-1.5 min-w-0 mr-2">
-                  <span className="text-slate-600 font-bold truncate max-w-[140px]" title={file.name}>
+                  <span className="text-slate-600 font-bold truncate max-w-[220px]" title={file.name}>
                     📄 {file.name}
                   </span>
                   <button
