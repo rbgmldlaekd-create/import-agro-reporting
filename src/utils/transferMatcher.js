@@ -344,19 +344,19 @@ export function matchTransferWithShipments({
     return (a.originalRowIndex || 0) - (b.originalRowIndex || 0);
   });
 
+  // O(1) 초고속 룩업용 shipment ID 맵 구축 (수만 건 루프 회피)
+  const shipmentIdMap = new Map();
+  for (const code of Object.keys(shipmentPool)) {
+    shipmentPool[code].forEach(sh => {
+      shipmentIdMap.set(sh.id, sh);
+    });
+  }
+
   // 4.5 완료 고정 건들의 출하 풀 선점 차감 처리
   sortedTransfers.forEach(transfer => {
     if (transfer.isCompletedFixed) {
       transfer.matchedDetails.forEach(detail => {
-        let foundShipment = null;
-        for (const code of Object.keys(shipmentPool)) {
-          const sh = shipmentPool[code].find(s => s.id === detail.shipmentId);
-          if (sh) {
-            foundShipment = sh;
-            break;
-          }
-        }
-        
+        const foundShipment = shipmentIdMap.get(detail.shipmentId);
         if (foundShipment) {
           const takeQty = Number((detail.matchedWt / foundShipment.unitWt).toFixed(5));
           foundShipment.remQty = Math.max(0, foundShipment.remQty - takeQty);
@@ -377,13 +377,17 @@ export function matchTransferWithShipments({
       let matchedPartWt = 0;
 
       // Gather available shipments for these codes
-      const availableShipments = [];
-      codes.forEach(code => {
-        if (shipmentPool[code]) {
-          availableShipments.push(...shipmentPool[code]);
-        }
-      });
-      availableShipments.sort((a, b) => a.date.localeCompare(b.date));
+      let availableShipments = [];
+      if (codes.length === 1) {
+        availableShipments = shipmentPool[codes[0]] || [];
+      } else {
+        codes.forEach(code => {
+          if (shipmentPool[code]) {
+            availableShipments.push(...shipmentPool[code]);
+          }
+        });
+        availableShipments.sort((a, b) => a.date.localeCompare(b.date));
+      }
 
       for (const shipment of availableShipments) {
         if (targetLeft <= 0) break;
