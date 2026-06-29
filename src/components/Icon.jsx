@@ -2,6 +2,7 @@ import React from 'react';
 import {
   PieChart,
   ChevronLeft,
+  ChevronRight,
   Menu,
   Database,
   LogOut,
@@ -26,6 +27,7 @@ import {
 const iconMapping = {
   'pie-chart': PieChart,
   'chevron-left': ChevronLeft,
+  'chevron-right': ChevronRight,
   'menu': Menu,
   'database': Database,
   'log-out': LogOut,

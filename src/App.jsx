@@ -32,6 +32,18 @@ function App() {
 
   // Render Inner Content Based on Active Menu
   const renderContent = () => {
+    if (store.isDbLoading) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-4 bg-slate-50/50">
+          <div className="w-10 h-10 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
+          <div className="text-center">
+            <h4 className="text-sm font-black text-slate-800">로컬 저장소 데이터 로드 중</h4>
+            <p className="text-xs text-slate-400 mt-1">대용량 출하 실적 및 기준정보 데이터를 안전하게 불러오고 있습니다. 잠시만 기다려 주세요...</p>
+          </div>
+        </div>
+      );
+    }
+
     switch (activeMenu) {
       case 'dashboard':
         return (
@@ -82,6 +94,7 @@ function App() {
               handleShipmentDelete={store.handleShipmentDelete}
               handleClientDelete={store.handleClientDelete}
               handleTargetDelete={store.handleTargetDelete}
+              handleClearAllShipments={store.handleClearAllShipments}
             />
           </div>
         );
@@ -92,7 +105,7 @@ function App() {
             <TransferMatchingSection
               shipmentCount={store.shipmentData.length}
               clientCount={store.clientInfoData.length}
-              transferFile={store.transferFile}
+              transferFiles={store.transferFiles}
               handleTransferUpload={store.handleTransferUpload}
               transferLoading={store.loading.transfer}
               transferData={store.transferData}
@@ -101,10 +114,12 @@ function App() {
               downloadAllTransferExcel={store.downloadAllTransferExcel}
               handleTransferDelete={store.handleTransferDelete}
               completedTransferIds={store.completedTransferIds}
+              completedDetailsMap={store.completedDetailsMap}
               toggleTransferComplete={store.toggleTransferComplete}
               restoreCompletedTransfers={store.restoreCompletedTransfers}
               shipmentData={store.shipmentData}
               activeTargetItems={store.activeTargetItems}
+              handleClearAllTransfers={store.handleClearAllTransfers}
             />
           </div>
         );

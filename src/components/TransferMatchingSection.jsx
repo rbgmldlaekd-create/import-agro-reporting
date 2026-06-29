@@ -7,7 +7,7 @@ import { ITEM_MAP } from '../utils/transferMatcher';
 const TransferMatchingSection = ({
   shipmentCount,
   clientCount,
-  transferFile,
+  transferFiles,
   handleTransferUpload,
   transferLoading,
   transferData,
@@ -16,12 +16,65 @@ const TransferMatchingSection = ({
   downloadAllTransferExcel,
   handleTransferDelete,
   completedTransferIds,
+  completedDetailsMap,
   toggleTransferComplete,
   restoreCompletedTransfers,
   shipmentData,
-  activeTargetItems
+  activeTargetItems,
+  handleClearAllTransfers
 }) => {
   const { matchedRecords, transferSummary } = transferMatchedData || { matchedRecords: [], transferSummary: [] };
+
+  const [activeTab, setActiveTab] = React.useState('pending'); // 'pending' | 'completed' | 'all'
+  const [downloadedIds, setDownloadedIds] = React.useState(completedTransferIds || []);
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const itemsPerPage = 50;
+
+  // 탭이나 데이터 길이가 변경되면 페이지 번호를 1로 리셋
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, transferSummary.length]);
+
+  // 백업 복구 등으로 이미 completed 상태인 건들은 다운로드 이력도 누적 복구해 줌
+  React.useEffect(() => {
+    if (completedTransferIds && completedTransferIds.length > 0) {
+      setDownloadedIds(prev => {
+        const next = [...prev];
+        completedTransferIds.forEach(id => {
+          if (!next.includes(id)) {
+            next.push(id);
+          }
+        });
+        return next;
+      });
+    }
+  }, [completedTransferIds]);
+
+  // 완료 탭으로 이동할 완전한 완료 조건: 신고완료 체크 AND 다운로드 완료
+  const isRowCompleted = React.useCallback((rowId) => {
+    return completedTransferIds?.includes(rowId) && downloadedIds.includes(rowId);
+  }, [completedTransferIds, downloadedIds]);
+
+  const pendingCount = transferSummary.filter(row => !isRowCompleted(row.id)).length;
+  const completedCount = transferSummary.filter(row => isRowCompleted(row.id)).length;
+  const allCount = transferSummary.length;
+
+  const filteredSummary = React.useMemo(() => {
+    if (activeTab === 'pending') {
+      return transferSummary.filter(row => !isRowCompleted(row.id));
+    }
+    if (activeTab === 'completed') {
+      return transferSummary.filter(row => isRowCompleted(row.id));
+    }
+    return transferSummary;
+  }, [transferSummary, isRowCompleted, activeTab]);
+
+  const totalPages = Math.ceil(filteredSummary.length / itemsPerPage) || 1;
+
+  const paginatedSummary = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredSummary.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredSummary, currentPage, itemsPerPage]);
 
   const getCodeName = (code) => {
     const found = activeTargetItems?.find(item => String(item.품목코드).trim() === String(code).trim());
@@ -84,12 +137,17 @@ const TransferMatchingSection = ({
       targetCodes.add('110350814');
     }
 
-    // Handle shifting codes for '냉동고추(익도홍)'
-    const hasIkdohong = Array.from(targetCodes).some(c => c === '120851542') || 
-                         (activeTargetItems && activeTargetItems.some(item => String(item.품목명 || '').includes('냉동고추(익도홍)')));
-    if (hasIkdohong) {
+    // Handle shifting codes for '냉동고추(익도홍)' & '냉동고추(금탑)'
+    const hasChiliDecimals = Array.from(targetCodes).some(c => ['120450343', '120450344', '120851542'].includes(c)) ||
+                             (activeTargetItems && activeTargetItems.some(item => 
+                               String(item.품목명 || '').includes('냉동고추(익도홍)') || 
+                               String(item.품목명 || '').includes('냉동고추(금탑)')
+                             ));
+    if (hasChiliDecimals) {
       targetCodes.add('120450343');
       targetCodes.add('120450344');
+      targetCodes.add('120851542');
+      targetCodes.add('120750227');
     }
 
     // 2. Filter shipmentData to ONLY target items
@@ -106,10 +164,31 @@ const TransferMatchingSection = ({
       alert('백업할 작업 완료 내역이 없습니다.');
       return;
     }
+
+    // 완료된 건들의 매칭 세부 상세 정보 맵 추출
+    const completedDetailsMap = {};
+    transferSummary.forEach(transfer => {
+      if (completedTransferIds.includes(transfer.id)) {
+        completedDetailsMap[transfer.id] = {
+          matchedQty: transfer.matchedQty,
+          matchedDetails: transfer.matchedDetails,
+          transferMeta: {
+            declarationNo: transfer.declarationNo,
+            serialNo: transfer.serialNo,
+            itemName: transfer.itemName,
+            targetQty: transfer.targetQty,
+            targetDate: transfer.targetDate,
+            supplierName: transfer.supplierName
+          }
+        };
+      }
+    });
+
     const dataStr = JSON.stringify({
-      version: '1.0',
+      version: '1.2',
       backupDate: new Date().toISOString(),
-      completedTransferIds
+      completedTransferIds,
+      completedDetailsMap
     }, null, 2);
     
     const blob = new Blob([dataStr], { type: 'application/json' });
@@ -148,9 +227,9 @@ const TransferMatchingSection = ({
       try {
         const parsed = JSON.parse(event.target.result);
         if (parsed && Array.isArray(parsed.completedTransferIds)) {
-          restoreCompletedTransfers(parsed.completedTransferIds);
+          restoreCompletedTransfers(parsed.completedTransferIds, parsed.completedDetailsMap || {});
         } else if (Array.isArray(parsed)) {
-          restoreCompletedTransfers(parsed);
+          restoreCompletedTransfers(parsed, {});
         } else {
           alert('올바르지 않은 백업 파일 형식입니다.');
         }
@@ -229,57 +308,78 @@ const TransferMatchingSection = ({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* 파일 업로드 카드 */}
-        <div className={`bg-white border ${transferFile ? 'border-indigo-200 shadow-[0_0_12px_rgba(79,70,229,0.05)]' : 'border-slate-200'} rounded-2xl p-5 shadow-sm transition-all duration-300 relative overflow-hidden md:col-span-1`}>
+        <div className={`bg-white border ${transferFiles && transferFiles.length > 0 ? 'border-indigo-200 shadow-[0_0_12px_rgba(79,70,229,0.05)]' : 'border-slate-200'} rounded-2xl p-5 shadow-sm transition-all duration-300 relative overflow-hidden md:col-span-1`}>
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 to-indigo-500"></div>
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs font-black text-slate-700 bg-slate-100 px-2 py-0.5 rounded-lg">UPLOAD</span>
-            {transferFile && (
+            {transferFiles && transferFiles.length > 0 && (
               <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
                 연동 완료
               </span>
             )}
           </div>
           <h3 className="text-sm font-black text-slate-800 mb-1">양수내역 업로드</h3>
-          <p className="text-[11px] text-slate-400 mb-4">포털에서 내려받은 양수내역 파일 (.xls)</p>
-
-          <div className={`relative border-2 border-dashed ${!isBaseReady ? 'border-slate-100 bg-slate-50/20 cursor-not-allowed' : (transferFile ? 'border-emerald-300 bg-emerald-50/10 hover:border-emerald-400 cursor-pointer' : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50 hover:bg-indigo-50/20 cursor-pointer')} rounded-xl p-6 text-center transition-all`}>
+          <p className="text-[11px] text-slate-400 mb-4">포털에서 내려받은 양수내역 파일 (.xls, .xlsx)</p>
+ 
+          <div className={`relative border-2 border-dashed ${!isBaseReady ? 'border-slate-100 bg-slate-50/20 cursor-not-allowed' : (transferFiles && transferFiles.length > 0 ? 'border-emerald-300 bg-emerald-50/10 hover:border-emerald-400 cursor-pointer' : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50 hover:bg-indigo-50/20 cursor-pointer')} rounded-xl p-6 text-center transition-all`}>
             <input
               type="file"
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               accept=".xls, .xlsx"
+              multiple
               disabled={!isBaseReady}
               onChange={handleTransferUpload}
             />
-            <Icon name="file-text" className={`w-8 h-8 ${!isBaseReady ? 'text-slate-300' : (transferFile ? 'text-emerald-500' : 'text-indigo-500')} mx-auto mb-2`} />
+            <Icon name="file-text" className={`w-8 h-8 ${!isBaseReady ? 'text-slate-300' : (transferFiles && transferFiles.length > 0 ? 'text-emerald-500' : 'text-indigo-500')} mx-auto mb-2`} />
             <span className="block text-xs font-bold text-slate-600 truncate px-2">
-              {transferLoading ? '양수내역 분석 중...' : (transferFile ? transferFile.name : '파일 선택 또는 드래그')}
+              {transferLoading ? '양수내역 분석 중...' : (transferFiles && transferFiles.length > 0 ? `${transferFiles.length}개 파일 업로드됨` : '파일 선택 또는 드래그')}
             </span>
             <span className="block text-[10px] text-slate-400 mt-1">
-              {!isBaseReady ? "'선택양수내역' 또는 '양수내역' 엑셀(.xls) 지원" : (transferFile ? '파일을 교체하려면 클릭' : "'선택양수내역' 또는 '양수내역' 엑셀(.xls) 지원")}
+              {!isBaseReady ? "'선택양수내역' 또는 '양수내역' 엑셀(.xls) 지원" : (transferFiles && transferFiles.length > 0 ? '파일을 더 추가하려면 클릭' : "'선택양수내역' 또는 '양수내역' 엑셀(.xls) 지원")}
             </span>
           </div>
-
-          {transferFile && (
-            <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between text-[11px]">
-              <div className="flex items-center gap-1.5 min-w-0 mr-2">
-                <span className="text-slate-600 font-bold truncate max-w-[120px]" title={transferFile.name}>
-                  📄 {transferFile.name}
-                </span>
+ 
+          {/* Uploaded Files List */}
+          {transferFiles && transferFiles.length > 0 && (
+            <div className="mt-2.5 space-y-2">
+              <div className="flex justify-between items-center px-1">
+                <span className="text-[10px] font-bold text-slate-400">업로드 파일 목록</span>
                 <button
                   type="button"
-                  onClick={handleTransferDelete}
-                  className="text-slate-400 hover:text-red-500 transition-colors shrink-0 p-0.5 hover:bg-slate-100 rounded"
-                  title="파일 삭제"
+                  onClick={handleClearAllTransfers}
+                  className="text-[10px] text-rose-500 hover:text-rose-700 font-extrabold hover:underline transition-all"
                 >
-                  <Icon name="x" className="w-3.5 h-3.5" />
+                  ⚠️ 양수내역 전체 삭제
                 </button>
               </div>
-              <span className="text-indigo-600 font-extrabold shrink-0">
-                {transferData.length.toLocaleString()}행 파싱 완료
-              </span>
+              <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+              {[...transferFiles].sort((a, b) => b.name.localeCompare(a.name)).map((file) => (
+                <div 
+                  key={file.name} 
+                  className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between text-[11px] hover:border-slate-300 transition-colors"
+                >
+                  <div className="flex items-center gap-1.5 min-w-0 mr-2">
+                    <span className="text-slate-600 font-bold truncate max-w-[220px]" title={file.name}>
+                      📄 {file.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleTransferDelete(file.name)}
+                      className="text-slate-400 hover:text-red-500 transition-colors shrink-0 p-0.5 hover:bg-slate-100 rounded"
+                      title="파일 삭제"
+                    >
+                      <Icon name="x" className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <span className="text-indigo-600 font-extrabold shrink-0">
+                    {file.count ? file.count.toLocaleString() : '0'}행
+                  </span>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
+      </div>
 
         {/* 매칭 현황 대시보드 카드 */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm md:col-span-2 flex flex-col justify-between relative overflow-hidden">
@@ -484,25 +584,26 @@ const TransferMatchingSection = ({
               </div>
               
               <div className="space-y-2">
-                {/* 냉동고추(익도홍) */}
+                {/* 냉동고추(금탑/익도홍) */}
                 <div className="bg-white p-2 rounded-lg border border-slate-100 space-y-1">
                   <div className="flex justify-between items-center">
-                    <span className="font-bold text-indigo-700">냉동고추(익도홍)</span>
-                    <span className="text-[8px] text-indigo-600 bg-indigo-50 px-1.5 py-0.2 rounded-full font-extrabold">규칙 추가</span>
+                    <span className="font-bold text-indigo-700">냉동고추(금탑/익도홍)</span>
+                    <span className="text-[8px] text-indigo-600 bg-indigo-50 px-1.5 py-0.2 rounded-full font-extrabold">규칙 업데이트</span>
                   </div>
                   <div className="text-[10px] space-y-1.5 pt-1 border-t border-slate-100">
                     <div className="flex justify-between items-center text-slate-600">
                       <span>정수 (소수점 없음)</span>
                       <div className="flex flex-col items-end">
                         <span className="font-mono text-[9px] bg-indigo-50 text-indigo-700 font-bold px-1 rounded">120450343/44</span>
-                        <span className="text-[8px] text-slate-400 font-bold mt-0.5 text-right">{getCodeName('120450343') || '고추가루'} / {getCodeName('120450344') || '고추가루'}</span>
+                        <span className="text-[8px] text-slate-400 font-bold mt-0.5 text-right">{getCodeName('120450343') || '고추가루(굵은)'} / {getCodeName('120450344') || '고추가루(고운)'}</span>
                       </div>
                     </div>
                     <div className="flex justify-between items-center text-slate-600 mt-1">
-                      <span>실수 (소수점 존재)</span>
-                      <div className="flex flex-col items-end">
-                        <span className="font-mono text-[9px] bg-slate-100 text-slate-500 font-bold px-1 rounded">120851542</span>
-                        <span className="text-[8px] text-slate-400 font-bold mt-0.5">{getCodeName('120851542') || '냉동고추(익도홍)'}</span>
+                      <span className="leading-snug">실수 (소수점 존재)<br/><span className="text-[8px] text-indigo-500 font-extrabold">*정수부+소수점부 분할 매칭</span></span>
+                      <div className="flex flex-col items-end text-right">
+                        <span className="font-mono text-[9px] text-slate-500 font-bold">정수 ➜ 120450343/44</span>
+                        <span className="font-mono text-[9px] text-slate-500 font-bold">.20 ➜ 120851542 (익도홍)</span>
+                        <span className="font-mono text-[9px] text-slate-500 font-bold">.34 ➜ 120750227 (크러쉬드)</span>
                       </div>
                     </div>
                   </div>
@@ -540,13 +641,70 @@ const TransferMatchingSection = ({
       {/* 3. 매칭 결과 상세 테이블 */}
       {transferData.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-sm font-black text-slate-800 flex items-center gap-1.5">
-              📋 선택양수내역 매칭 상세 현황
-            </h3>
-            <span className="text-xs font-bold text-slate-400">
-              총 {transferSummary.length}건
-            </span>
+          {/* 헤더 및 탭 스위처 */}
+          <div className="px-6 pt-5 pb-0 border-b border-slate-150 bg-slate-50/30">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4">
+              <h3 className="text-sm font-black text-slate-800 flex items-center gap-1.5">
+                📋 선택양수내역 매칭 상세 현황
+              </h3>
+              <span className="text-xs font-bold text-slate-400">
+                총 {transferSummary.length}건 중 {completedCount}건 신고완료
+              </span>
+            </div>
+
+            {/* 탭 버튼 그룹 */}
+            <div className="flex gap-1 -mb-[1px]">
+              <button
+                type="button"
+                onClick={() => setActiveTab('pending')}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-xs font-bold border-t border-x transition-all duration-200 ${
+                  activeTab === 'pending'
+                    ? 'bg-white border-slate-200 text-indigo-600'
+                    : 'bg-transparent border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100/50'
+                }`}
+              >
+                📂 신고 대기 건
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                  activeTab === 'pending' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {pendingCount}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('completed')}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-xs font-bold border-t border-x transition-all duration-200 ${
+                  activeTab === 'completed'
+                    ? 'bg-white border-slate-200 text-emerald-600'
+                    : 'bg-transparent border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100/50'
+                }`}
+              >
+                ✓ 신고 완료 건
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                  activeTab === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {completedCount}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('all')}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-xs font-bold border-t border-x transition-all duration-200 ${
+                  activeTab === 'all'
+                    ? 'bg-white border-slate-200 text-slate-700'
+                    : 'bg-transparent border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100/50'
+                }`}
+              >
+                전체 보기
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                  activeTab === 'all' ? 'bg-slate-100 text-slate-600' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {allCount}
+                </span>
+              </button>
+            </div>
           </div>
           
           <div className="overflow-x-auto">
@@ -566,60 +724,141 @@ const TransferMatchingSection = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {transferSummary.map((row) => {
-                  const isUnder = row.matchedQty < row.targetQty;
-                  const isCompleted = completedTransferIds && completedTransferIds.includes(row.id);
-                  return (
-                     <tr key={row.id} className={`hover:bg-slate-50/50 transition-colors ${isCompleted ? 'bg-yellow-50/70 border-l-2 border-yellow-400' : ''}`}>
-                      <td className="py-3.5 px-4 text-center font-bold text-slate-400">{row.originalRowIndex}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-slate-600">{formatDate(row.targetDate)}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-slate-700">{row.declarationNo}</td>
-                      <td className="py-3.5 px-4 font-bold text-slate-700">
-                        {row.itemName}
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-bold text-slate-600">{row.targetQty.toLocaleString()} kg</td>
-                      <td className={`py-3.5 px-4 text-right font-black ${isUnder ? 'text-amber-600' : 'text-indigo-600'}`}>
-                        {row.matchedQty.toLocaleString()} kg
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        {isUnder ? (
-                          <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full font-bold bg-amber-50 border border-amber-200 text-amber-700 text-[10px]">
-                            ⚠️ 미달
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full font-bold bg-emerald-50 border border-emerald-100 text-emerald-700 text-[10px]">
-                            ✓ 완료
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 text-center font-bold text-slate-500">
-                        {row.matchedDetails.length}회 분할매칭
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <Button
-                          variant={isCompleted ? "success" : "outline"}
-                          size="xs"
-                          onClick={() => toggleTransferComplete(row.id)}
-                        >
-                          {isCompleted ? "✓ 신고완료" : "신고 대기"}
-                        </Button>
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <Button
-                          variant="indigo_light"
-                          size="xs"
-                          disabled={row.matchedQty === 0}
-                          onClick={() => downloadSingleTransferExcel(row)}
-                        >
-                          💾 받기
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {filteredSummary.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="py-12 text-center text-slate-400 font-bold">
+                      <div className="flex flex-col items-center justify-center">
+                        <Icon name="folder-open" className="w-8 h-8 text-slate-350 mb-2" />
+                        이 탭에 해당하는 내역이 없습니다.
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedSummary.map((row) => {
+                    const isUnder = row.matchedQty < row.targetQty;
+                    const isCompleted = completedTransferIds && completedTransferIds.includes(row.id);
+                    const isDownloaded = downloadedIds.includes(row.id);
+                    const isFullyCompleted = isRowCompleted(row.id);
+                    return (
+                       <tr key={row.id} className={`hover:bg-slate-50/50 transition-colors ${isFullyCompleted ? 'bg-emerald-50/40 border-l-2 border-emerald-500' : ''}`}>
+                        <td className="py-3.5 px-4 text-center font-bold text-slate-400">{row.originalRowIndex}</td>
+                        <td className="py-3.5 px-4 font-mono font-bold text-slate-600">{formatDate(row.targetDate)}</td>
+                        <td className="py-3.5 px-4 font-mono font-bold text-slate-700">{row.declarationNo}</td>
+                        <td className="py-3.5 px-4 font-bold text-slate-700">
+                          {row.itemName}
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-bold text-slate-600">{row.targetQty.toLocaleString()} kg</td>
+                        <td className={`py-3.5 px-4 text-right font-black ${isUnder ? 'text-amber-600' : 'text-indigo-600'}`}>
+                          {row.matchedQty.toLocaleString()} kg
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          {isUnder ? (
+                            <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full font-bold bg-amber-50 border border-amber-200 text-amber-700 text-[10px]">
+                              ⚠️ 미달
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full font-bold bg-emerald-50 border border-emerald-100 text-emerald-700 text-[10px]">
+                              ✓ 완료
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-center font-bold text-slate-500">
+                          {row.matchedDetails.length}회 분할매칭
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <Button
+                            variant={isCompleted ? "success" : "outline"}
+                            size="xs"
+                            onClick={() => toggleTransferComplete(row.id)}
+                          >
+                            {isCompleted ? "✓ 신고완료" : "신고 대기"}
+                          </Button>
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <Button
+                            variant="indigo_light"
+                            size="xs"
+                            disabled={row.matchedQty === 0}
+                            className={isDownloaded ? 'border-emerald-200 text-emerald-600 bg-emerald-50/50 hover:bg-emerald-100/70 hover:text-emerald-700' : ''}
+                            onClick={() => {
+                                downloadSingleTransferExcel(row);
+                                if (!downloadedIds.includes(row.id)) {
+                                  setDownloadedIds(prev => [...prev, row.id]);
+                                }
+                            }}
+                          >
+                            {isDownloaded ? "✓ 다운됨" : "💾 받기"}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
+
+          {/* 페이지네이션 컨트롤러 */}
+          {totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-4 border-t border-slate-150 bg-slate-50/30">
+              <span className="text-xs text-slate-500 font-bold">
+                총 {filteredSummary.length.toLocaleString()}건 중 {((currentPage - 1) * itemsPerPage + 1).toLocaleString()} - {Math.min(currentPage * itemsPerPage, filteredSummary.length).toLocaleString()} 표시
+              </span>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  className="p-1.5 min-w-0"
+                >
+                  <Icon name="chevron-left" className="w-3.5 h-3.5" />
+                </Button>
+                
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(pageNum => {
+                      // 현재 페이지 근처의 5개 페이지 번호만 표시
+                      return (
+                        pageNum === 1 ||
+                        pageNum === totalPages ||
+                        Math.abs(pageNum - currentPage) <= 2
+                      );
+                    })
+                    .map((pageNum, idx, arr) => {
+                      const showEllipsis = idx > 0 && pageNum - arr[idx - 1] > 1;
+                      return (
+                        <React.Fragment key={pageNum}>
+                          {showEllipsis && <span className="text-slate-400 text-xs px-1 font-bold">...</span>}
+                          <button
+                            type="button"
+                            onClick={() => setCurrentPage(pageNum)}
+                            className={`w-7 h-7 rounded-lg text-xs font-black transition-all ${
+                              currentPage === pageNum
+                                ? 'bg-indigo-600 text-white'
+                                : 'text-slate-500 hover:bg-slate-100'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        </React.Fragment>
+                      );
+                    })}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  className="p-1.5 min-w-0"
+                >
+                  <Icon name="chevron-right" className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

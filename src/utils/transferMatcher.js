@@ -21,8 +21,26 @@ const FALLBACK_WEIGHT_MAP = {
   '120851542': 0.2,
   '110350814': 1.0,
   '120951580': 10.0,
-  '120750227': 1.0
+  '120750227': 0.34
 };
+
+let lastShipmentCache = {
+  shipmentList: null,
+  clientInfoList: null,
+  targetItemList: null,
+  shipmentPool: null
+};
+
+function cloneShipmentPool(pool) {
+  const cloned = {};
+  for (const code of Object.keys(pool)) {
+    cloned[code] = pool[code].map(item => ({
+      ...item,
+      clientRecord: item.clientRecord
+    }));
+  }
+  return cloned;
+}
 
 /**
  * 2차원 배열 형태의 양수내역 데이터를 파싱하여 정규화된 객체 리스트로 변환합니다.
@@ -164,7 +182,9 @@ export function matchTransferWithShipments({
   transferList,
   shipmentList,
   clientInfoList,
-  targetItemList
+  targetItemList,
+  completedTransferIds = [],
+  completedDetailsMap = {}
 }) {
   if (!transferList.length || !shipmentList.length) {
     return { matchedRecords: [], transferSummary: [] };
@@ -188,54 +208,74 @@ export function matchTransferWithShipments({
     }
   });
 
-  // 3. 출하 데이터 전처리 및 품목별 리스트화
-  const shipmentPool = {}; // { '품목코드': [ {출하일자, 수량, 총무게, 남은무게, 거래처정보...} ] }
+  // 3. 출하 데이터 전처리 및 품목별 리스트화 (캐시 활용)
+  let shipmentPool;
   
-  shipmentList.forEach(row => {
-    // 주문번호가 없는 빈 행은 스킵
-    if (!row['주문번호'] && !row['출하거래처'] && !row['품목']) return;
+  const isCacheValid = 
+    lastShipmentCache.shipmentPool &&
+    lastShipmentCache.shipmentList === shipmentList &&
+    lastShipmentCache.clientInfoList === clientInfoList &&
+    lastShipmentCache.targetItemList === targetItemList;
 
-    const itemCode = String(row['품목'] || row['품목코드'] || row['코드'] || '').trim();
-    if (!itemCode) return;
+  if (isCacheValid) {
+    shipmentPool = cloneShipmentPool(lastShipmentCache.shipmentPool);
+  } else {
+    const newPool = {};
+    shipmentList.forEach(row => {
+      if (!row['주문번호'] && !row['출하거래처'] && !row['품목']) return;
 
-    const rawDate = row['출하일자'] || row['배송일자'] || row['주문일자'];
-    const date = formatExcelDate(rawDate);
-    if (!date) return;
+      const itemCode = String(row['품목'] || row['품목코드'] || row['코드'] || '').trim();
+      if (!itemCode) return;
 
-    const qty = parseQuantity(row);
-    if (qty <= 0) return;
+      const rawDate = row['출하일자'] || row['배송일자'] || row['주문일자'];
+      const date = formatExcelDate(rawDate);
+      if (!date) return;
 
-    const unitWt = weightMap.has(itemCode) ? weightMap.get(itemCode) : (FALLBACK_WEIGHT_MAP[itemCode] || 1.0);
-    const weightKg = Number((qty * unitWt).toFixed(3));
+      const qty = parseQuantity(row);
+      if (qty <= 0) return;
 
-    const clientKey = String(row['출하거래처'] || '').trim();
-    const clientRecord = clientMap.get(clientKey) || {
-      '거래유형': '소매업체',
-      '사업자등록번호': '0000000000',
-      '상호(성명)': row['출하거래처명'] || '미확인거래처',
-      '주소(판매장소)': '주소 정보 없음'
+      const unitWt = weightMap.has(itemCode) ? weightMap.get(itemCode) : (FALLBACK_WEIGHT_MAP[itemCode] || 1.0);
+      const weightKg = Number((qty * unitWt).toFixed(3));
+
+      const clientKey = String(row['출하거래처'] || '').trim();
+      const clientRecord = clientMap.get(clientKey) || {
+        '출하거래처': clientKey,
+        '거래유형': '소매업체',
+        '사업자등록번호': '0000000000',
+        '상호(성명)': row['출하거래처명'] || '미확인거래처',
+        '주소(판매장소)': '주소 정보 없음'
+      };
+
+      if (!newPool[itemCode]) {
+        newPool[itemCode] = [];
+      }
+
+      newPool[itemCode].push({
+        id: row._id || `shipment-${Math.random().toString(36).substr(2, 9)}`,
+        itemCode,
+        date,
+        qty,
+        remQty: qty,
+        unitWt,
+        weightKg,
+        remWeightKg: weightKg,
+        clientRecord
+      });
+    });
+
+    Object.keys(newPool).forEach(code => {
+      newPool[code].sort((a, b) => a.date.localeCompare(b.date));
+    });
+
+    lastShipmentCache = {
+      shipmentList,
+      clientInfoList,
+      targetItemList,
+      shipmentPool: newPool
     };
 
-    if (!shipmentPool[itemCode]) {
-      shipmentPool[itemCode] = [];
-    }
-
-    shipmentPool[itemCode].push({
-      id: row._id || `shipment-${Math.random().toString(36).substr(2, 9)}`,
-      itemCode,
-      date,
-      qty,
-      unitWt,
-      weightKg,
-      remWeightKg: weightKg,
-      clientRecord
-    });
-  });
-
-  // 출하 데이터 풀을 품목코드별로 날짜 오름차순(오래된 순) 정렬
-  Object.keys(shipmentPool).forEach(code => {
-    shipmentPool[code].sort((a, b) => a.date.localeCompare(b.date));
-  });
+    shipmentPool = cloneShipmentPool(newPool);
+  }
 
   // 4. 양수내역 리스트 중 대상품목이 아닌 것 필터링 및 복제/정렬
   const targetCodes = new Set(Array.from(weightMap.keys()));
@@ -270,19 +310,32 @@ export function matchTransferWithShipments({
       return true;
     }
 
-    // 4) '냉동고추(익도홍)' 우회코드 및 변형품목명 검사
-    if (itemName.includes('냉동고추(익도홍)') && (targetCodes.has('120851542') || targetCodes.has('120450343') || targetCodes.has('120450344'))) {
+    // 4) '냉동고추(익도홍)' & '냉동고추(금탑)' 우회코드 및 변형품목명 검사
+    if ((itemName.includes('냉동고추(익도홍)') || itemName.includes('냉동고추(금탑)')) && 
+        (targetCodes.has('120851542') || targetCodes.has('120450343') || targetCodes.has('120450344') || targetCodes.has('120750227'))) {
       return true;
     }
 
     return false;
   });
 
-  const sortedTransfers = filteredTransfers.map(t => ({
-    ...t,
-    matchedQty: 0,
-    matchedDetails: []
-  })).sort((a, b) => {
+  const sortedTransfers = filteredTransfers.map(t => {
+    const isCompleted = completedTransferIds.includes(t.id);
+    const saved = completedDetailsMap[t.id];
+    if (isCompleted && saved) {
+      return {
+        ...t,
+        matchedQty: saved.matchedQty || 0,
+        matchedDetails: saved.matchedDetails || [],
+        isCompletedFixed: true
+      };
+    }
+    return {
+      ...t,
+      matchedQty: 0,
+      matchedDetails: []
+    };
+  }).sort((a, b) => {
     const valA = a.targetDate || '';
     const valB = b.targetDate || '';
     if (valA !== valB) {
@@ -291,9 +344,75 @@ export function matchTransferWithShipments({
     return (a.originalRowIndex || 0) - (b.originalRowIndex || 0);
   });
 
+  // 4.5 완료 고정 건들의 출하 풀 선점 차감 처리
+  sortedTransfers.forEach(transfer => {
+    if (transfer.isCompletedFixed) {
+      transfer.matchedDetails.forEach(detail => {
+        let foundShipment = null;
+        for (const code of Object.keys(shipmentPool)) {
+          const sh = shipmentPool[code].find(s => s.id === detail.shipmentId);
+          if (sh) {
+            foundShipment = sh;
+            break;
+          }
+        }
+        
+        if (foundShipment) {
+          const takeQty = Number((detail.matchedWt / foundShipment.unitWt).toFixed(5));
+          foundShipment.remQty = Math.max(0, foundShipment.remQty - takeQty);
+          foundShipment.remWeightKg = Number((foundShipment.remQty * foundShipment.unitWt).toFixed(3));
+        }
+      });
+    }
+  });
+
   // 5. FIFO 매칭 루프
   sortedTransfers.forEach(transfer => {
+    if (transfer.isCompletedFixed) return; // 완료 고정 건은 연산 건너뜀
     const itemName = transfer.itemName;
+    // Helper to perform matching for a specific set of codes and target weight
+    const matchPart = (codes, targetAmt) => {
+      if (targetAmt <= 0) return 0;
+      let targetLeft = targetAmt;
+      let matchedPartWt = 0;
+
+      // Gather available shipments for these codes
+      const availableShipments = [];
+      codes.forEach(code => {
+        if (shipmentPool[code]) {
+          availableShipments.push(...shipmentPool[code]);
+        }
+      });
+      availableShipments.sort((a, b) => a.date.localeCompare(b.date));
+
+      for (const shipment of availableShipments) {
+        if (targetLeft <= 0) break;
+        if (shipment.remWeightKg <= 0 || shipment.remQty <= 0) continue;
+        if (shipment.date < transfer.targetDate) continue;
+
+        // 소수점 이하 분할 매칭 금지: 낱개(수량 1) 단위를 쪼개서 매칭하지 않음.
+        const maxQtyToTake = Math.min(shipment.remQty, targetLeft / shipment.unitWt);
+        const takeQty = Math.floor(Number(maxQtyToTake.toFixed(5)));
+        
+        if (takeQty <= 0) continue;
+
+        const takeWt = Number((takeQty * shipment.unitWt).toFixed(3));
+        shipment.remQty -= takeQty;
+        shipment.remWeightKg = Number((shipment.remQty * shipment.unitWt).toFixed(3));
+        
+        targetLeft = Number((targetLeft - takeWt).toFixed(3));
+        matchedPartWt = Number((matchedPartWt + takeWt).toFixed(3));
+
+        transfer.matchedDetails.push({
+          shipmentId: shipment.id,
+          date: shipment.date,
+          matchedWt: takeWt,
+          clientRecord: shipment.clientRecord
+        });
+      }
+      return matchedPartWt;
+    };
+
     // 양수 품목명에 연계된 출하 품목코드 목록 구하기
     let matchedCodes = ITEM_MAP[itemName] || [];
     
@@ -316,7 +435,7 @@ export function matchTransferWithShipments({
       if (isDecimal) {
         matchedCodes = ['120750227']; // 소수점인 경우: 크러쉬드페퍼(레드페퍼)
       } else {
-        matchedCodes = ['110350814']; // 소수점이 아닌 경우: (종료)건고추(베트남)
+        matchedCodes = ['110350814', '120450343', '120450344']; // 소수점이 아닌 경우: 건고추(베트남) 및 고추가루(굵은/고운)
       }
     }
 
@@ -328,39 +447,63 @@ export function matchTransferWithShipments({
       }
     }
 
-    // 대상 품목코드들의 출하 내역들을 가져와서 날짜순 병합
-    const availableShipments = [];
-    matchedCodes.forEach(code => {
-      if (shipmentPool[code]) {
-        availableShipments.push(...shipmentPool[code]);
+    // 냉동고추(금탑) 및 냉동고추(익도홍) 소수점 분할 매칭 처리
+    const isChiliException = matchedCodes.includes('120450343') || 
+                             matchedCodes.includes('120450344') || 
+                             matchedCodes.includes('120851542') ||
+                             itemName.includes('냉동고추(금탑)') ||
+                             itemName.includes('냉동고추(익도홍)');
+
+    const hasDecimal = transfer.targetQty % 1 !== 0;
+
+    if (isChiliException && hasDecimal) {
+      const intPart = Math.floor(transfer.targetQty);
+      const decPart = Number((transfer.targetQty % 1).toFixed(3));
+
+      // 1) 정수 부분 ➜ 고추가루(굵은/고운) 매칭
+      if (intPart > 0) {
+        const matchedIntWt = matchPart(['120450343', '120450344'], intPart);
+        transfer.matchedQty = Number((transfer.matchedQty + matchedIntWt).toFixed(3));
       }
-    });
 
-    // 여러 품목코드(예: 금탑 2개 코드)가 섞여있으므로 다시 일자 오름차순으로 정렬
-    availableShipments.sort((a, b) => a.date.localeCompare(b.date));
+      // 2) 소수점 부분 ➜ decPart에 맞는 코드 매칭
+      if (decPart > 0) {
+        // 소수점 부분 내에서도 0.5kg 단위(고추가루)가 포함되어 있을 수 있으므로 먼저 분할 (예: 0.5kg, 0.7kg, 0.84kg 등)
+        const decIntPart = Math.floor(decPart / 0.5) * 0.5;
+        const decRemPart = Number((decPart - decIntPart).toFixed(3));
 
-    let remTarget = Number(transfer.targetQty.toFixed(3));
+        if (decIntPart > 0) {
+          const matchedDecIntWt = matchPart(['120450343', '120450344'], decIntPart);
+          transfer.matchedQty = Number((transfer.matchedQty + matchedDecIntWt).toFixed(3));
+        }
 
-    for (const shipment of availableShipments) {
-      if (remTarget <= 0) break;
-      if (shipment.remWeightKg <= 0) continue;
+        if (decRemPart > 0) {
+          let decCodes = [];
+          const mult34 = decRemPart / 0.34;
+          const mult20 = decRemPart / 0.2;
+
+          if (Math.abs(mult34 - Math.round(mult34)) < 0.01) {
+            decCodes = ['120750227', '250251466']; // 크러쉬드페퍼(레드페퍼) / 기타 냉동고추
+          } else if (Math.abs(mult20 - Math.round(mult20)) < 0.01) {
+            decCodes = ['120851542']; // 베트남고추(냉동) / 익도홍
+          } else {
+            decCodes = ['120851542']; // 기본값
+          }
+
+          const matchedDecWt = matchPart(decCodes, decRemPart);
+          transfer.matchedQty = Number((transfer.matchedQty + matchedDecWt).toFixed(3));
+        }
+      }
+    } else {
+      // 일반 단일 품목 매칭
+      let activeCodes = [...matchedCodes];
+      // 냉동고추(익도홍) 정수 거래량인 경우, 고추가루로 매칭하는 예외 규칙 유지
+      if ((matchedCodes.includes('120851542') || itemName.includes('냉동고추(익도홍)')) && !hasDecimal) {
+        activeCodes = ['120450343', '120450344'];
+      }
       
-      // 제약조건: 출하일자(shipment.date)가 양수 거래일자(transfer.targetDate)보다 빠르면 안됨 (출하일자 >= 양수 거래일자)
-      if (shipment.date < transfer.targetDate) {
-        continue; 
-      }
-
-      const take = Number(Math.min(shipment.remWeightKg, remTarget).toFixed(3));
-      shipment.remWeightKg = Number((shipment.remWeightKg - take).toFixed(3));
-      remTarget = Number((remTarget - take).toFixed(3));
-      transfer.matchedQty = Number((transfer.matchedQty + take).toFixed(3));
-
-      transfer.matchedDetails.push({
-        shipmentId: shipment.id,
-        date: shipment.date,
-        matchedWt: take,
-        clientRecord: shipment.clientRecord
-      });
+      const matchedWt = matchPart(activeCodes, transfer.targetQty);
+      transfer.matchedQty = Number((transfer.matchedQty + matchedWt).toFixed(3));
     }
   });
 
@@ -372,8 +515,17 @@ export function matchTransferWithShipments({
       const bsn = client["사업자등록번호('-'제외)"] || client["사업자등록번호"] || '';
       const cleanBsn = String(bsn).replace(/\D/g, '');
 
+      let entrpsTyNm = String(client['거래유형'] || '소매업체').trim();
+      const transferDate = transfer.targetDate || '';
+      const clientCode = String(client['출하거래처'] || '').trim();
+      const hasAlphabet = /[a-zA-Z]/.test(clientCode);
+
+      if (transferDate >= '20240311' && hasAlphabet) {
+        entrpsTyNm = '자가소비';
+      }
+
       matchedRecords.push({
-        entrpsTyNm: String(client['거래유형'] || '소매업체').trim(),
+        entrpsTyNm,
         bsnmNo: cleanBsn,
         entrpsNm: String(client['상호(성명)'] || client['상호'] || client['출하거래처명'] || '').trim(),
         bassAdres: String(client['주소(판매장소)'] || client['주소'] || '').trim(),

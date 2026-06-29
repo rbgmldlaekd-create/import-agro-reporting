@@ -18,17 +18,46 @@ import {
   dbClear
 } from '../utils/db';
 
+function getPureSuffix(id) {
+  if (!id) return '';
+  const match = id.match(/\.(xlsx?|csv)-(transfer-row-\d+)$/i);
+  return match ? match[2] : id;
+}
+
+let memoryShipmentData = [];
+
+// IndexedDB 쓰기 작업 디바운싱 헬퍼 (디스크 I/O 병목 및 브라우저 프리징 해결)
+let debouncedSaveTimer = null;
+const debouncedSaveShipmentData = (data) => {
+  if (debouncedSaveTimer) clearTimeout(debouncedSaveTimer);
+  debouncedSaveTimer = setTimeout(() => {
+    dbSet('shipmentData', data).catch(console.error);
+  }, 1000);
+};
+
+let debouncedTransferTimer = null;
+const debouncedSaveTransferData = (data) => {
+  if (debouncedTransferTimer) clearTimeout(debouncedTransferTimer);
+  debouncedTransferTimer = setTimeout(() => {
+    dbSet('transferData', data).catch(console.error);
+  }, 1000);
+};
+
 export function useReportingStore() {
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isDbLoading, setIsDbLoading] = useState(true);
 
   // File upload states (restored as virtual File-like objects with only name property)
   const [shipmentFiles, setShipmentFiles] = useState([]);
   const [clientInfoFile, setClientInfoFile] = useState(null);
   const [targetItemsFile, setTargetItemsFile] = useState(null);
-  const [transferFile, setTransferFile] = useState(null);
+  const [transferFiles, setTransferFiles] = useState([]);
 
   // Parsed raw lists
-  const [shipmentData, setShipmentData] = useState([]);
+  const [shipmentVersion, setShipmentVersion] = useState(0);
+  const shipmentData = useMemo(() => {
+    return memoryShipmentData;
+  }, [shipmentVersion]);
   const [clientInfoData, setClientInfoData] = useState([]);
   const [baseTargetItems, setBaseTargetItems] = useState([]);
   const [transferData, setTransferData] = useState([]);
@@ -38,6 +67,7 @@ export function useReportingStore() {
 
   // Declaration completion states
   const [completedTransferIds, setCompletedTransferIds] = useState([]);
+  const [completedDetailsMap, setCompletedDetailsMap] = useState({});
 
   // Form & Dropdown & Search states
   const [customCode, setCustomCode] = useState('');
@@ -59,31 +89,74 @@ export function useReportingStore() {
   useEffect(() => {
     async function initStore() {
       try {
-        const storedShipmentFiles = await dbGet('shipmentFiles', []);
-        const storedClientInfoFileName = await dbGet('clientInfoFileName', null);
-        const storedTargetItemsFileName = await dbGet('targetItemsFileName', null);
-        const storedTransferFileName = await dbGet('transferFileName', null);
-        const storedShipmentData = await dbGet('shipmentData', []);
-        const storedClientInfoData = await dbGet('clientInfoData', []);
-        const storedBaseTargetItems = await dbGet('baseTargetItems', []);
-        const storedTransferData = await dbGet('transferData', []);
-        const storedActiveTargetItems = await dbGet('activeTargetItems', []);
-        const storedCompletedTransferIds = await dbGet('completedTransferIds', []);
+        // 가볍고 화면 초기 부팅에 즉시 필요한 데이터들을 병렬로 먼저 로드
+        const [
+          storedShipmentFiles,
+          storedClientInfoFileName,
+          storedTargetItemsFileName,
+          storedTransferFiles,
+          storedTransferFileName,
+          storedBaseTargetItems,
+          storedActiveTargetItems,
+          storedCompletedTransferIds,
+          storedCompletedDetailsMap
+        ] = await Promise.all([
+          dbGet('shipmentFiles', []),
+          dbGet('clientInfoFileName', null),
+          dbGet('targetItemsFileName', null),
+          dbGet('transferFiles', null),
+          dbGet('transferFileName', null),
+          dbGet('baseTargetItems', []),
+          dbGet('activeTargetItems', []),
+          dbGet('completedTransferIds', []),
+          dbGet('completedDetailsMap', {})
+        ]);
 
         setShipmentFiles(storedShipmentFiles);
         if (storedClientInfoFileName) setClientInfoFile({ name: storedClientInfoFileName });
         if (storedTargetItemsFileName) setTargetItemsFile({ name: storedTargetItemsFileName });
-        if (storedTransferFileName) setTransferFile({ name: storedTransferFileName });
-        setShipmentData(storedShipmentData);
-        setClientInfoData(storedClientInfoData);
+        
+        if (storedTransferFiles) {
+          setTransferFiles(storedTransferFiles);
+        } else if (storedTransferFileName) {
+          setTransferFiles([{ name: storedTransferFileName, count: 0 }]); // 지연 로딩 전 임시 count
+        } else {
+          setTransferFiles([]);
+        }
         setBaseTargetItems(storedBaseTargetItems);
-        setTransferData(storedTransferData);
         setActiveTargetItems(storedActiveTargetItems);
         setCompletedTransferIds(storedCompletedTransferIds);
+        setCompletedDetailsMap(storedCompletedDetailsMap);
+        
+        // 1단계 로드 완료: 브라우저 화면이 멈춤(하얗게 프리징) 없이 즉시 렌더링되게 함
+        setIsLoaded(true);
+
+        // 2단계: 무겁고 대량인 실제 매칭 정보 데이터들을 백그라운드에서 병렬 로드
+        const [storedClientInfoData, storedTransferData, storedShipmentData] = await Promise.all([
+          dbGet('clientInfoData', []),
+          dbGet('transferData', []),
+          dbGet('shipmentData', [])
+        ]);
+
+        setClientInfoData(storedClientInfoData);
+        setTransferData(storedTransferData);
+        
+        // 1년치 대용량 출하 데이터는 React State 대신 memory 변수에 올리고 버전 갱신
+        memoryShipmentData = storedShipmentData;
+        setShipmentVersion(v => v + 1);
+
+        // 만약 transferFiles가 로드되어 있으면 행 개수를 실제 데이터 크기로 정확히 보정
+        if (storedTransferFileName && storedTransferData.length > 0) {
+          setTransferFiles([{ name: storedTransferFileName, count: storedTransferData.length }]);
+        }
+
+        // 모든 본 데이터 로드 완료
+        setIsDbLoading(false);
+
       } catch (e) {
         console.error('Failed to restore data from IndexedDB:', e);
-      } finally {
         setIsLoaded(true);
+        setIsDbLoading(false);
       }
     }
     initStore();
@@ -118,17 +191,13 @@ export function useReportingStore() {
 
   useEffect(() => {
     if (isLoaded) {
-      if (transferFile) {
-        dbSet('transferFileName', transferFile.name || '');
-      } else {
-        dbDelete('transferFileName');
-      }
+      dbSet('transferFiles', transferFiles);
     }
-  }, [transferFile, isLoaded]);
+  }, [transferFiles, isLoaded]);
 
   useEffect(() => {
     if (isLoaded) {
-      dbSet('shipmentData', shipmentData);
+      debouncedSaveShipmentData(shipmentData);
     }
   }, [shipmentData, isLoaded]);
 
@@ -152,7 +221,7 @@ export function useReportingStore() {
 
   useEffect(() => {
     if (isLoaded) {
-      dbSet('transferData', transferData);
+      debouncedSaveTransferData(transferData);
     }
   }, [transferData, isLoaded]);
 
@@ -161,6 +230,56 @@ export function useReportingStore() {
       dbSet('completedTransferIds', completedTransferIds);
     }
   }, [completedTransferIds, isLoaded]);
+
+  useEffect(() => {
+    if (isLoaded) {
+      dbSet('completedDetailsMap', completedDetailsMap);
+    }
+  }, [completedDetailsMap, isLoaded]);
+
+  // Auto-normalize completedTransferIds when transferData changes to support backward compatibility
+  useEffect(() => {
+    if (isLoaded && transferData.length > 0 && completedTransferIds.length > 0) {
+      let changed = false;
+      const nextIds = completedTransferIds.map(id => {
+        // 이미 새로운 transferData 에 완전히 일치하는 ID가 있다면 그대로 둠
+        if (transferData.some(row => row.id === id)) {
+          return id;
+        }
+        
+        // 없다면 suffix 기반으로 매칭 시도
+        const suffix = getPureSuffix(id);
+        const matchingRow = transferData.find(row => getPureSuffix(row.id) === suffix);
+        if (matchingRow && matchingRow.id !== id) {
+          changed = true;
+          return matchingRow.id;
+        }
+        return id;
+      });
+
+      if (changed) {
+        setCompletedTransferIds(nextIds);
+        setCompletedDetailsMap(prevMap => {
+          const nextMap = {};
+          Object.keys(prevMap).forEach(key => {
+            if (transferData.some(row => row.id === key)) {
+              nextMap[key] = prevMap[key];
+              return;
+            }
+            
+            const suffix = getPureSuffix(key);
+            const matchingRow = transferData.find(row => getPureSuffix(row.id) === suffix);
+            if (matchingRow) {
+              nextMap[matchingRow.id] = prevMap[key];
+            } else {
+              nextMap[key] = prevMap[key];
+            }
+          });
+          return nextMap;
+        });
+      }
+    }
+  }, [transferData, completedTransferIds, isLoaded]);
 
   // Reset all uploaded and stored data
   const handleResetAllData = async () => {
@@ -178,13 +297,15 @@ export function useReportingStore() {
     setShipmentFiles([]);
     setClientInfoFile(null);
     setTargetItemsFile(null);
-    setTransferFile(null);
-    setShipmentData([]);
+    setTransferFiles([]);
+    memoryShipmentData = [];
+    setShipmentVersion(v => v + 1);
     setClientInfoData([]);
     setBaseTargetItems([]);
     setActiveTargetItems([]);
     setTransferData([]);
     setCompletedTransferIds([]);
+    setCompletedDetailsMap({});
 
     // Reset form states
     setCustomCode('');
@@ -267,11 +388,12 @@ export function useReportingStore() {
       });
       
       // Update data (overwrite rows associated with the same file names)
-      setShipmentData(prev => {
+      memoryShipmentData = (() => {
         const fileNamesToUpload = files.map(f => f.name);
-        const filtered = prev.filter(row => !fileNamesToUpload.includes(row._fileName));
+        const filtered = memoryShipmentData.filter(row => !fileNamesToUpload.includes(row._fileName));
         return [...filtered, ...newShipmentRows];
-      });
+      })();
+      setShipmentVersion(v => v + 1);
     } catch (err) {
       alert(`출하내역 파일 파싱 에러: ${err.message}`);
     } finally {
@@ -320,20 +442,45 @@ export function useReportingStore() {
     }
   };
 
-  // Handle Transfer upload
+  // Handle Transfer upload (cumulative / multiple files support)
   const handleTransferUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setTransferFile(file);
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
     setLoading(prev => ({ ...prev, transfer: true }));
     try {
-      const rawRows = await parseFileAsAOA(file);
-      const parsedTransfers = parseTransferXls(rawRows);
-      setTransferData(parsedTransfers);
+      const newFilesList = [];
+      let newTransferRows = [];
+
+      for (const file of files) {
+        const rawRows = await parseFileAsAOA(file);
+        const parsedTransfers = parseTransferXls(rawRows).map(item => ({
+          ...item,
+          id: `${file.name}-${item.id}`, // Ensure unique row ID across multiple files
+          _fileName: file.name
+        }));
+        
+        newFilesList.push({ name: file.name, count: parsedTransfers.length });
+        newTransferRows = [...newTransferRows, ...parsedTransfers];
+      }
+
+      // Update files list (overwrite if file name already exists)
+      setTransferFiles(prev => {
+        const fileNamesToUpload = files.map(f => f.name);
+        const filtered = prev.filter(f => !fileNamesToUpload.includes(f.name));
+        return [...filtered, ...newFilesList];
+      });
+
+      // Update transfer data (overwrite rows associated with same file names)
+      setTransferData(prev => {
+        const fileNamesToUpload = files.map(f => f.name);
+        const filtered = prev.filter(row => !fileNamesToUpload.includes(row._fileName));
+        return [...filtered, ...newTransferRows];
+      });
     } catch (err) {
       alert(`양수내역 파일 파싱 에러: ${err.message}`);
     } finally {
       setLoading(prev => ({ ...prev, transfer: false }));
+      e.target.value = '';
     }
   };
 
@@ -341,11 +488,12 @@ export function useReportingStore() {
   const handleShipmentDelete = (fileName) => {
     if (fileName) {
       setShipmentFiles(prev => prev.filter(f => f.name !== fileName));
-      setShipmentData(prev => prev.filter(row => row._fileName !== fileName));
+      memoryShipmentData = memoryShipmentData.filter(row => row._fileName !== fileName);
     } else {
       setShipmentFiles([]);
-      setShipmentData([]);
+      memoryShipmentData = [];
     }
+    setShipmentVersion(v => v + 1);
   };
 
   const handleClientDelete = () => {
@@ -359,9 +507,45 @@ export function useReportingStore() {
     setActiveTargetItems([]);
   };
 
-  const handleTransferDelete = () => {
-    setTransferFile(null);
+  const handleTransferDelete = (fileName) => {
+    if (fileName) {
+      setTransferFiles(prev => prev.filter(f => f.name !== fileName));
+      setTransferData(prev => prev.filter(row => row._fileName !== fileName));
+    } else {
+      setTransferFiles([]);
+      setTransferData([]);
+    }
+  };
+
+  const handleClearAllShipments = async () => {
+    if (!window.confirm('등록된 모든 출하내역 파일을 일괄 삭제하시겠습니까?')) return;
+    setShipmentFiles([]);
+    memoryShipmentData = [];
+    setShipmentVersion(v => v + 1);
+
+    try {
+      await dbDelete('shipmentFiles');
+      await dbDelete('shipmentData');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleClearAllTransfers = async () => {
+    if (!window.confirm('등록된 모든 양수내역 파일을 일괄 삭제하시겠습니까?')) return;
+    setTransferFiles([]);
     setTransferData([]);
+    setCompletedTransferIds([]);
+    setCompletedDetailsMap({});
+
+    try {
+      await dbDelete('transferFiles');
+      await dbDelete('transferData');
+      await dbDelete('completedTransferIds');
+      await dbDelete('completedDetailsMap');
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   // Helper alias to bypass local variable conflict
@@ -484,16 +668,23 @@ export function useReportingStore() {
         _fileName: '데모_출하내역.xlsx'
     }));
 
+    const mockTransfersMapped = mockTransfers.map(row => ({
+      ...row,
+      id: `데모_선택양수내역.xls-${row.id}`,
+      _fileName: '데모_선택양수내역.xls'
+    }));
+
     setBaseTargetItems(mockTargetItems);
     setActiveTargetItems(mockTargetItems);
     setClientInfoData(mockClients);
-    setShipmentData(mockShipmentsMapped);
-    setTransferData(mockTransfers);
+    memoryShipmentData = mockShipmentsMapped;
+    setShipmentVersion(v => v + 1);
+    setTransferData(mockTransfersMapped);
 
     setShipmentFiles([{ name: '데모_출하내역.xlsx', count: mockShipments.length }]);
     setClientInfoFile({ name: '데모_거래처기준정보.xlsx' });
     setTargetItemsFile({ name: '데모_대상품목기준.xlsx' });
-    setTransferFile({ name: '데모_선택양수내역.xls' });
+    setTransferFiles([{ name: '데모_선택양수내역.xls', count: mockTransfers.length }]);
   };
 
   // Filtered active target items for display
@@ -551,38 +742,108 @@ export function useReportingStore() {
       transferList: transferData,
       shipmentList: shipmentData,
       clientInfoList: clientInfoData,
-      targetItemList: activeTargetItems
+      targetItemList: activeTargetItems,
+      completedTransferIds,
+      completedDetailsMap
     });
-  }, [transferData, shipmentData, clientInfoData, activeTargetItems]);
+  }, [transferData, shipmentData, clientInfoData, activeTargetItems, completedTransferIds, completedDetailsMap]);
 
   const toggleTransferComplete = (id) => {
     setCompletedTransferIds(prev => {
-      if (prev.includes(id)) {
-        return prev.filter(x => x !== id);
-      } else {
+      const isCompleting = !prev.includes(id);
+      if (isCompleting) {
+        const currentMatched = transferMatchedData.transferSummary.find(t => t.id === id);
+        if (currentMatched) {
+          setCompletedDetailsMap(prevMap => ({
+            ...prevMap,
+            [id]: {
+              matchedQty: currentMatched.matchedQty,
+              matchedDetails: currentMatched.matchedDetails
+            }
+          }));
+        }
         return [...prev, id];
+      } else {
+        setCompletedDetailsMap(prevMap => {
+          const next = { ...prevMap };
+          delete next[id];
+          return next;
+        });
+        return prev.filter(x => x !== id);
       }
     });
   };
 
-  const restoreCompletedTransfers = (ids) => {
+  const restoreCompletedTransfers = (ids, detailsMap = {}) => {
     if (!Array.isArray(ids)) {
       alert('올바른 백업 파일 형식이 아닙니다.');
       return;
     }
-    setCompletedTransferIds(ids);
-    alert(`성공적으로 복구되었습니다. (총 ${ids.length}건)`);
+
+    // 신규 ID 매핑 정보 생성 { [oldId]: newId }
+    const oldToNewMap = {};
+
+    ids.forEach(oldId => {
+      // 1. 이미 동일한 ID가 transferData 에 존재한다면 매칭
+      if (transferData.some(row => row.id === oldId)) {
+        oldToNewMap[oldId] = oldId;
+        return;
+      }
+
+      const detail = detailsMap[oldId];
+      
+      // 2. transferMeta 가 존재한다면 비즈니스 키 기반 스마트 매칭
+      if (detail && detail.transferMeta) {
+        const meta = detail.transferMeta;
+        const foundByMeta = transferData.find(row => 
+          String(row.declarationNo).trim() === String(meta.declarationNo).trim() &&
+          String(row.itemName).trim() === String(meta.itemName).trim() &&
+          Number(row.targetQty) === Number(meta.targetQty) &&
+          String(row.targetDate).replace(/\D/g, '') === String(meta.targetDate).replace(/\D/g, '')
+        );
+        if (foundByMeta) {
+          oldToNewMap[oldId] = foundByMeta.id;
+          return;
+        }
+      }
+
+      // 3. 비즈니스 키 매칭이 실패했거나 없는 경우, suffix (행번호) 기반 매칭
+      const suffix = getPureSuffix(oldId);
+      const foundBySuffix = transferData.find(row => getPureSuffix(row.id) === suffix);
+      if (foundBySuffix) {
+        oldToNewMap[oldId] = foundBySuffix.id;
+        return;
+      }
+
+      // 4. 모두 실패한 경우 구형 ID 그대로 유지
+      oldToNewMap[oldId] = oldId;
+    });
+
+    const normalizedIds = ids.map(id => oldToNewMap[id] || id);
+
+    const normalizedDetailsMap = {};
+    Object.keys(detailsMap).forEach(key => {
+      const newKey = oldToNewMap[key] || key;
+      normalizedDetailsMap[newKey] = detailsMap[key];
+    });
+
+    setCompletedTransferIds(normalizedIds);
+    setCompletedDetailsMap(normalizedDetailsMap);
+    alert(`성공적으로 복구되었습니다. (총 ${normalizedIds.length}건)`);
   };
 
   return {
     // Files & Data state
+    isLoaded,
+    isDbLoading,
     shipmentFiles,
     shipmentDateRange,
     clientInfoFile,
     targetItemsFile,
-    transferFile,
+    transferFiles,
     shipmentData,
     completedTransferIds,
+    completedDetailsMap,
     toggleTransferComplete,
     restoreCompletedTransfers,
     clientInfoData,
@@ -627,6 +888,8 @@ export function useReportingStore() {
     handleClientDelete,
     handleTargetDelete,
     handleTransferDelete,
+    handleClearAllShipments,
+    handleClearAllTransfers,
     handleResetAllData,
     handleLoadDemo,
     handleDeleteItem,

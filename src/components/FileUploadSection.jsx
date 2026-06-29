@@ -17,7 +17,8 @@ const FileUploadSection = ({
   targetCount,
   handleShipmentDelete,
   handleClientDelete,
-  handleTargetDelete
+  handleTargetDelete,
+  handleClearAllShipments
 }) => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -61,9 +62,19 @@ const FileUploadSection = ({
           </div>
         )}
 
-        {/* Uploaded Files List */}
         {shipmentFiles && shipmentFiles.length > 0 && (
-          <div className="mt-2.5 space-y-1.5 max-h-72 overflow-y-auto pr-1">
+          <div className="mt-2.5 space-y-2">
+            <div className="flex justify-between items-center px-1">
+              <span className="text-[10px] font-bold text-slate-400">업로드 파일 목록</span>
+              <button
+                type="button"
+                onClick={handleClearAllShipments}
+                className="text-[10px] text-rose-500 hover:text-rose-750 font-extrabold hover:underline transition-all"
+              >
+                ⚠️ 출하내역 전체 삭제
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
             {[...shipmentFiles].sort((a, b) => b.name.localeCompare(a.name)).map((file) => (
               <div 
                 key={file.name} 
@@ -88,7 +99,8 @@ const FileUploadSection = ({
               </div>
             ))}
           </div>
-        )}
+        </div>
+      )}
       </div>
 
       {/* Card 2: Client Base Info Upload */}
