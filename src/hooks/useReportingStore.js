@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   parseFile,
   parseFileAsAOA,
@@ -45,6 +45,7 @@ const debouncedSaveTransferData = (data) => {
 
 export function useReportingStore() {
   const [isLoaded, setIsLoaded] = useState(false);
+  const lastNormalizedTransferDataRef = useRef(null);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
   // File upload states (restored as virtual File-like objects with only name property)
@@ -240,6 +241,10 @@ export function useReportingStore() {
   // Auto-normalize completedTransferIds when transferData changes to support backward compatibility
   useEffect(() => {
     if (isLoaded && transferData.length > 0 && completedTransferIds.length > 0) {
+      if (lastNormalizedTransferDataRef.current === transferData) {
+        return;
+      }
+      lastNormalizedTransferDataRef.current = transferData;
       let changed = false;
       const nextIds = completedTransferIds.map(id => {
         // 이미 새로운 transferData 에 완전히 일치하는 ID가 있다면 그대로 둠
@@ -749,29 +754,27 @@ export function useReportingStore() {
   }, [transferData, shipmentData, clientInfoData, activeTargetItems, completedTransferIds, completedDetailsMap]);
 
   const toggleTransferComplete = (id) => {
-    setCompletedTransferIds(prev => {
-      const isCompleting = !prev.includes(id);
-      if (isCompleting) {
-        const currentMatched = transferMatchedData.transferSummary.find(t => t.id === id);
-        if (currentMatched) {
-          setCompletedDetailsMap(prevMap => ({
-            ...prevMap,
-            [id]: {
-              matchedQty: currentMatched.matchedQty,
-              matchedDetails: currentMatched.matchedDetails
-            }
-          }));
-        }
-        return [...prev, id];
-      } else {
-        setCompletedDetailsMap(prevMap => {
-          const next = { ...prevMap };
-          delete next[id];
-          return next;
-        });
-        return prev.filter(x => x !== id);
+    const isCompleting = !completedTransferIds.includes(id);
+    if (isCompleting) {
+      const currentMatched = transferMatchedData?.transferSummary?.find(t => t.id === id);
+      if (currentMatched) {
+        setCompletedDetailsMap(prevMap => ({
+          ...prevMap,
+          [id]: {
+            matchedQty: currentMatched.matchedQty,
+            matchedDetails: currentMatched.matchedDetails
+          }
+        }));
       }
-    });
+      setCompletedTransferIds(prev => [...prev, id]);
+    } else {
+      setCompletedDetailsMap(prevMap => {
+        const next = { ...prevMap };
+        delete next[id];
+        return next;
+      });
+      setCompletedTransferIds(prev => prev.filter(x => x !== id));
+    }
   };
 
   const restoreCompletedTransfers = (ids, detailsMap = {}) => {

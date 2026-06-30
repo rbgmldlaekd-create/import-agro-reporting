@@ -51,12 +51,26 @@ const TransferMatchingSection = ({
   }, [completedTransferIds]);
 
   // 완료 탭으로 이동할 완전한 완료 조건: 신고완료 체크 AND 다운로드 완료
-  const isRowCompleted = React.useCallback((rowId) => {
-    return completedTransferIds?.includes(rowId) && downloadedIds.includes(rowId);
-  }, [completedTransferIds, downloadedIds]);
+  const completedSet = React.useMemo(() => new Set(completedTransferIds || []), [completedTransferIds]);
+  const downloadedSet = React.useMemo(() => new Set(downloadedIds || []), [downloadedIds]);
 
-  const pendingCount = transferSummary.filter(row => !isRowCompleted(row.id)).length;
-  const completedCount = transferSummary.filter(row => isRowCompleted(row.id)).length;
+  const isRowCompleted = React.useCallback((rowId) => {
+    return completedSet.has(rowId) && downloadedSet.has(rowId);
+  }, [completedSet, downloadedSet]);
+
+  const { pendingCount, completedCount } = React.useMemo(() => {
+    let pending = 0;
+    let completed = 0;
+    transferSummary.forEach(row => {
+      if (isRowCompleted(row.id)) {
+        completed++;
+      } else {
+        pending++;
+      }
+    });
+    return { pendingCount: pending, completedCount: completed };
+  }, [transferSummary, isRowCompleted]);
+
   const allCount = transferSummary.length;
 
   const filteredSummary = React.useMemo(() => {
@@ -321,21 +335,20 @@ const TransferMatchingSection = ({
           <h3 className="text-sm font-black text-slate-800 mb-1">양수내역 업로드</h3>
           <p className="text-[11px] text-slate-400 mb-4">포털에서 내려받은 양수내역 파일 (.xls, .xlsx)</p>
  
-          <div className={`relative border-2 border-dashed ${!isBaseReady ? 'border-slate-100 bg-slate-50/20 cursor-not-allowed' : (transferFiles && transferFiles.length > 0 ? 'border-emerald-300 bg-emerald-50/10 hover:border-emerald-400 cursor-pointer' : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50 hover:bg-indigo-50/20 cursor-pointer')} rounded-xl p-6 text-center transition-all`}>
+          <div className={`relative border-2 border-dashed ${transferFiles && transferFiles.length > 0 ? 'border-emerald-300 bg-emerald-50/10 hover:border-emerald-400 cursor-pointer' : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50 hover:bg-indigo-50/20 cursor-pointer'} rounded-xl p-6 text-center transition-all`}>
             <input
               type="file"
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               accept=".xls, .xlsx"
               multiple
-              disabled={!isBaseReady}
               onChange={handleTransferUpload}
             />
-            <Icon name="file-text" className={`w-8 h-8 ${!isBaseReady ? 'text-slate-300' : (transferFiles && transferFiles.length > 0 ? 'text-emerald-500' : 'text-indigo-500')} mx-auto mb-2`} />
+            <Icon name="file-text" className={`w-8 h-8 ${transferFiles && transferFiles.length > 0 ? 'text-emerald-500' : 'text-indigo-500'} mx-auto mb-2`} />
             <span className="block text-xs font-bold text-slate-600 truncate px-2">
               {transferLoading ? '양수내역 분석 중...' : (transferFiles && transferFiles.length > 0 ? `${transferFiles.length}개 파일 업로드됨` : '파일 선택 또는 드래그')}
             </span>
             <span className="block text-[10px] text-slate-400 mt-1">
-              {!isBaseReady ? "'선택양수내역' 또는 '양수내역' 엑셀(.xls) 지원" : (transferFiles && transferFiles.length > 0 ? '파일을 더 추가하려면 클릭' : "'선택양수내역' 또는 '양수내역' 엑셀(.xls) 지원")}
+              {transferFiles && transferFiles.length > 0 ? '파일을 더 추가하려면 클릭' : "'선택양수내역' 또는 '양수내역' 엑셀(.xls) 지원"}
             </span>
           </div>
  
@@ -736,8 +749,8 @@ const TransferMatchingSection = ({
                 ) : (
                   paginatedSummary.map((row) => {
                     const isUnder = row.matchedQty < row.targetQty;
-                    const isCompleted = completedTransferIds && completedTransferIds.includes(row.id);
-                    const isDownloaded = downloadedIds.includes(row.id);
+                    const isCompleted = completedSet.has(row.id);
+                    const isDownloaded = downloadedSet.has(row.id);
                     const isFullyCompleted = isRowCompleted(row.id);
                     return (
                        <tr key={row.id} className={`hover:bg-slate-50/50 transition-colors ${isFullyCompleted ? 'bg-emerald-50/40 border-l-2 border-emerald-500' : ''}`}>

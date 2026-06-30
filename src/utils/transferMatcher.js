@@ -366,6 +366,28 @@ export function matchTransferWithShipments({
     }
   });
 
+  // 4.8 다중 코드 결합 캐시 (매번 다중 코드 병합 및 정렬이 반복적으로 발생하여 발생하는 프리징 현상 방지)
+  const mergedPoolCache = new Map();
+  const getMergedShipments = (codes) => {
+    if (codes.length === 1) {
+      return shipmentPool[codes[0]] || [];
+    }
+    const cacheKey = codes.join(',');
+    if (mergedPoolCache.has(cacheKey)) {
+      return mergedPoolCache.get(cacheKey);
+    }
+
+    const merged = [];
+    codes.forEach(code => {
+      if (shipmentPool[code]) {
+        merged.push(...shipmentPool[code]);
+      }
+    });
+    merged.sort((a, b) => a.date.localeCompare(b.date));
+    mergedPoolCache.set(cacheKey, merged);
+    return merged;
+  };
+
   // 5. FIFO 매칭 루프
   sortedTransfers.forEach(transfer => {
     if (transfer.isCompletedFixed) return; // 완료 고정 건은 연산 건너뜀
@@ -377,17 +399,7 @@ export function matchTransferWithShipments({
       let matchedPartWt = 0;
 
       // Gather available shipments for these codes
-      let availableShipments = [];
-      if (codes.length === 1) {
-        availableShipments = shipmentPool[codes[0]] || [];
-      } else {
-        codes.forEach(code => {
-          if (shipmentPool[code]) {
-            availableShipments.push(...shipmentPool[code]);
-          }
-        });
-        availableShipments.sort((a, b) => a.date.localeCompare(b.date));
-      }
+      const availableShipments = getMergedShipments(codes);
 
       for (const shipment of availableShipments) {
         if (targetLeft <= 0) break;
